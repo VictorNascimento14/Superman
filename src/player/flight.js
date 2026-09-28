@@ -1,4 +1,5 @@
 import { Vector3, Quaternion, Matrix4, MathUtils } from 'three';
+import { altitude, fromCity, nearCity, upAt, speedCap, EARTH, SPACE } from '../space/nav.js';
 
 // Física de voo. Só usa as classes de matemática do three (rodam no Node sem DOM),
 // por isso é testada em tests/flight.test.js.
@@ -41,6 +42,7 @@ export function createFlight(collision, spawn) {
     walk: 0,
     events: [], // { type: 'sonicboom' | 'impact' | 'takeoff' | 'land', ... } — consumidos por quem desenha
     orientation: new Quaternion(),
+    altitude: 0, // até a superfície da Terra (esfera), não até o chão da cidade
   };
   // Vetores de trabalho: nada aloca no update (invariante 2).
   const dir = new Vector3();
@@ -134,6 +136,12 @@ export function createFlight(collision, spawn) {
   };
 
   function move(dt) {
+    // Longe da cidade não há o que colidir: o chão plano dela, do outro lado da Terra,
+    // puxaria o herói de volta para y = 0.
+    if (!nearCity(s.pos)) {
+      s.pos.addScaledVector(s.vel, dt);
+      return;
+    }
     // Subdivide o passo para a esfera nunca andar mais que ~0,8 m sem checar parede.
     const dist = s.vel.length() * dt;
     const steps = Math.min(60, Math.max(1, Math.ceil(dist / 0.8)));
@@ -150,6 +158,16 @@ export function createFlight(collision, spawn) {
       step.copy(s.vel).multiplyScalar(dt / steps);
     }
     if (hitSpeed > FLIGHT.impactSpeed) s.events.push({ type: 'impact', speed: hitSpeed, at: s.pos.clone() });
+  }
+
+  // Só Metrópolis tem chão: fora do mundo plano, o herói não desce abaixo de SPACE.floor —
+  // é empurrado de volta pela vertical local e perde a componente que entra.
+  function floorOutsideCity() {
+    if (fromCity(s.pos) <= SPACE.flatRadius || altitude(s.pos) >= SPACE.floor) return;
+    upAt(s.pos, n);
+    s.pos.set(n.x * (EARTH.radius + SPACE.floor), n.y * (EARTH.radius + SPACE.floor) - EARTH.radius, n.z * (EARTH.radius + SPACE.floor));
+    const into = s.vel.dot(n);
+    if (into < 0) s.vel.addScaledVector(n, -into);
   }
 
   function groundHeight() {
@@ -189,22 +207,31 @@ export function createFlight(collision, spawn) {
       const wasSuper = s.supersonic;
       s.supersonic = s.boostTime > FLIGHT.supersonicAfter;
       const tier = s.supersonic ? 'supersonic' : input.boost ? 'boost' : 'cruise';
+      const alt = altitude(s.pos);
+      // No espaço, o boost vira hipervelocidade: o alvo cresce com a altitude, então a subida
+      // é exponencial (20 km → 20.000 km em ~10 s).
+      const hyper = alt > SPACE.from && input.boost;
       if (thrust) {
         wish.copy(dir).multiplyScalar(input.forward).addScaledVector(right, input.right).addScaledVector(UP, input.up);
         if (wish.lengthSq() > 1) wish.normalize();
-        wish.multiplyScalar(FLIGHT[tier]);
-        const k = 1 - Math.exp(-dt * FLIGHT.steer[tier]);
+        wish.multiplyScalar(hyper ? Math.max(FLIGHT[tier], SPACE.hyper * alt) : FLIGHT[tier]);
+        const k = 1 - Math.exp(-dt * (hyper ? SPACE.hyper : FLIGHT.steer[tier]));
         s.vel.lerp(wish, k);
       } else {
         s.vel.multiplyScalar(Math.exp(-dt * FLIGHT.hoverDamp)); // pairar: o herói freia sozinho
       }
+      // Teto duro proporcional à altitude: em cada quadro anda bem menos que a distância até a
+      // Terra, então a aproximação é suave e nunca atravessa a superfície.
+      const cap = speedCap(alt, FLIGHT.supersonic);
+      if (s.vel.lengthSq() > cap * cap) s.vel.setLength(cap);
       move(dt);
+      floorOutsideCity();
       if (!wasSuper && s.supersonic) s.events.push({ type: 'supersonic' });
       if (before < FLIGHT.sound && s.vel.length() >= FLIGHT.sound) s.events.push({ type: 'sonicboom', at: s.pos.clone() });
       // Pouso: encostou no chão/telhado devagar, sem estar subindo.
       const g = groundHeight();
       // Dentro de um prédio o "chão" de heightAt é o telhado dele: pousar ali teleportava.
-      if (smashCount === 0 && s.pos.y - FLIGHT.radius <= g + 0.15 && s.vel.length() < 18 && input.up <= 0 && s.vel.y <= 0.5) {
+      if (smashCount === 0 && nearCity(s.pos) && s.pos.y - FLIGHT.radius <= g + 0.15 && s.vel.length() < 18 && input.up <= 0 && s.vel.y <= 0.5) {
         s.mode = 'ground';
         s.pos.y = g + FLIGHT.footDepth;
         s.vel.y = 0;
@@ -213,6 +240,7 @@ export function createFlight(collision, spawn) {
       }
     }
     s.speed = s.vel.length();
+    s.altitude = altitude(s.pos);
     updatePose(dt);
     updateOrientation(dt);
   }

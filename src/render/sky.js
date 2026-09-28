@@ -23,6 +23,15 @@ export function createSky(scene, renderer, preset, world = scene) {
   sky.frustumCulled = false;
   world.add(sky);
   const u = sky.material.uniforms;
+  // Transparente para o espaço aparecer por trás conforme o herói sobe (setSpace).
+  // Abaixo do horizonte esmaece antes (uFadeLow): lá embaixo o chão passa a ser o globo.
+  u.uFade = { value: 1 };
+  u.uFadeLow = { value: 1 };
+  sky.material.transparent = true;
+  sky.material.fragmentShader = 'uniform float uFade;\nuniform float uFadeLow;\n' + sky.material.fragmentShader.replace(
+    'gl_FragColor = vec4( texColor, 1.0 );',
+    'gl_FragColor = vec4( texColor, uFade * mix( uFadeLow, 1.0, smoothstep( -0.06, 0.02, direction.y ) ) );',
+  );
   u.mieCoefficient.value = 0.004;
   u.mieDirectionalG.value = 0.8;
   u.cloudCoverage.value = 0.35;
@@ -64,12 +73,31 @@ export function createSky(scene, renderer, preset, world = scene) {
   world.add(stars);
 
   const sunDir = new THREE.Vector3();
+  // Intensidades do horário; o espaço multiplica por cima (setSpace).
+  const base = { hemi: 1, env: 0.55, stars: 0 };
+  let spaceK = 0;
+  let lowK = 0;
+  // 0 = chão, 1 = acima da atmosfera: o céu fica transparente e deixa ver a cena do espaço
+  // (desenhada antes); a luz azul do céu e o reflexo dele no herói apagam. `low` faz o mesmo
+  // só abaixo do horizonte, mais cedo: de lá de cima, o chão é o globo.
+  function setSpace(k, low = k) {
+    spaceK = k;
+    lowK = low;
+    u.uFade.value = nightDome.material.uniforms.fade.value = 1 - k;
+    u.uFadeLow.value = nightDome.material.uniforms.fadeLow.value = 1 - low;
+    hemi.intensity = base.hemi * (1 - 0.85 * k);
+    scene.environmentIntensity = base.env * (1 - 0.8 * k);
+    stars.material.opacity = base.stars * (1 - k);
+    stars.visible = stars.material.opacity > 0;
+  }
   // Eixos da câmera de sombra (olha ao longo de −sunDir, com o up padrão): a grade de texel
   // do shadow map segue estes eixos, não x/z do mundo.
   const lightRight = new THREE.Vector3();
   const lightUp = new THREE.Vector3();
   const snap = new THREE.Vector3();
-  const state = { name: 'dia', night: 0, exposure: 0.55, sunDir };
+  // sunDir: a luz direcional da cidade (à noite vira lua, nunca abaixo de 18°); sunTrue: onde
+  // o Sol está de verdade — é ele que ilumina o globo visto do espaço.
+  const state = { name: 'dia', night: 0, exposure: 0.55, sunDir, sunTrue: u.sunPosition.value };
 
   function setTime(name) {
     const p = TIME_PRESETS[name];
@@ -90,19 +118,21 @@ export function createSky(scene, renderer, preset, world = scene) {
     lightUp.crossVectors(sunDir, lightRight);
     sun.color.set(p.sun);
     sun.intensity = p.sunI;
-    hemi.intensity = p.hemiI;
+    base.hemi = p.hemiI;
     hemi.color.set(p.night > 0.9 ? 0x4a5a8a : 0xbfd8ff);
     scene.fog.color.set(fogColorFor(p));
-    stars.material.opacity = Math.max(0, p.night - 0.6) / 0.4;
-    stars.visible = stars.material.opacity > 0;
+    base.stars = Math.max(0, p.night - 0.6) / 0.4;
     const isNight = p.elevation < 0;
     sky.visible = envSky.visible = !isNight;
     nightDome.visible = envNightDome.visible = isNight;
 
     envRT?.dispose();
+    // O mapa de ambiente é o céu visto do chão: renderiza sem o esmaecimento do espaço.
+    u.uFade.value = u.uFadeLow.value = nightDome.material.uniforms.fade.value = nightDome.material.uniforms.fadeLow.value = 1;
     envRT = pmrem.fromScene(envScene, 0, 1, 5000);
     scene.environment = envRT.texture;
-    scene.environmentIntensity = p.night > 0.9 ? 0.25 : 0.55;
+    base.env = p.night > 0.9 ? 0.25 : 0.55;
+    setSpace(spaceK, lowK);
   }
 
   function update(dt, focus, time) {
@@ -122,7 +152,7 @@ export function createSky(scene, renderer, preset, world = scene) {
   }
 
   setTime('dia');
-  return { setTime, update, state, sun, hemi };
+  return { setTime, setSpace, update, state, sun, hemi };
 }
 
 function fogColorFor(p) {
@@ -136,17 +166,18 @@ function makeNightDome() {
     side: THREE.BackSide,
     depthWrite: false,
     fog: false,
-    uniforms: { horizon: { value: new THREE.Color(0x24345c) }, zenith: { value: new THREE.Color(0x03060f) } },
+    transparent: true,
+    uniforms: { horizon: { value: new THREE.Color(0x24345c) }, zenith: { value: new THREE.Color(0x03060f) }, fade: { value: 1 }, fadeLow: { value: 1 } },
     vertexShader: `varying vec3 vDir;
       void main() {
         vDir = normalize(position);
         gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
         gl_Position.z = gl_Position.w;
       }`,
-    fragmentShader: `uniform vec3 horizon; uniform vec3 zenith; varying vec3 vDir;
+    fragmentShader: `uniform vec3 horizon; uniform vec3 zenith; uniform float fade; uniform float fadeLow; varying vec3 vDir;
       void main() {
         float t = pow(clamp(vDir.y, 0.0, 1.0), 0.45);
-        gl_FragColor = vec4(mix(horizon, zenith, t), 1.0);
+        gl_FragColor = vec4(mix(horizon, zenith, t), fade * mix(fadeLow, 1.0, smoothstep(-0.06, 0.02, vDir.y)));
         #include <colorspace_fragment>
       }`,
   });

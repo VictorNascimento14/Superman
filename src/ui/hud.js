@@ -5,6 +5,8 @@ import { HALF } from '../world/layout.js';
 const CSS = `
 #hud { position: fixed; inset: 0; pointer-events: none; color: #eef2fb; font: 600 14px/1.2 system-ui, sans-serif; text-shadow: 0 1px 3px rgba(0,0,0,.7); z-index: 5; }
 #hud.hidden { display: none; }
+#hud .beacon { position: absolute; left: 0; top: 0; display: none; padding: 1px 6px 1px 16px; font-size: 12px; color: #a8e4ff; white-space: nowrap; margin: -8px 0 0 -6px; }
+#hud .beacon::before { content: ''; position: absolute; left: 1px; top: 4px; width: 8px; height: 8px; border: 2px solid #a8e4ff; transform: rotate(45deg); }
 #hud .dust { position: absolute; inset: 0; opacity: 0; background: radial-gradient(ellipse at center, rgba(96,84,70,.55) 0%, rgba(52,44,36,.92) 70%, rgba(28,24,20,.97) 100%); }
 #hud .speed { position: absolute; left: 24px; bottom: 22px; }
 #hud .speed b { display: block; font: 800 44px/1 system-ui; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
@@ -13,6 +15,7 @@ const CSS = `
 #hud .bar i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #4da3ff, #f2c230 70%, #ff4a3d); }
 #hud .mode { display: inline-block; margin-top: 4px; padding: 2px 8px; font-size: 11px; letter-spacing: .12em; background: rgba(10,20,45,.6); border: 1px solid rgba(255,255,255,.2); border-radius: 4px; }
 #hud .mode.super { color: #1a1300; background: #f2c230; border-color: #f2c230; }
+#hud .mode.hyper { color: #fff; background: #5b3cc4; border-color: #8a6cff; }
 #hud .map { position: absolute; right: 22px; bottom: 22px; width: 200px; height: 200px; border-radius: 50%; border: 2px solid rgba(255,255,255,.35); box-shadow: 0 4px 18px rgba(0,0,0,.45); }
 #hud .objective { position: absolute; top: 18px; left: 50%; transform: translateX(-50%); padding: 8px 16px; background: rgba(10,20,45,.55); border-radius: 8px; text-align: center; max-width: 70vw; }
 #hud .objective:empty { display: none; }
@@ -28,7 +31,10 @@ const CSS = `
 @media (max-width: 640px) { #hud .map { width: 130px; height: 130px; } #hud .speed b { font-size: 32px; } #hud .bar { width: 150px; } }
 `;
 
-const MODE_LABEL = { idle: 'EM PÉ', hover: 'PAIRANDO', fly: 'VOO', flyFast: 'VELOCIDADE', super: 'SUPERSÔNICO' };
+const MODE_LABEL = { idle: 'EM PÉ', hover: 'PAIRANDO', fly: 'VOO', flyFast: 'VELOCIDADE', super: 'SUPERSÔNICO', hyper: 'HIPERVELOCIDADE' };
+const LIGHT = 299792458; // m/s: em escala real, a hipervelocidade passa da luz
+const NUM0 = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 0 });
+const NUM1 = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 1 });
 const MAP_PX = 512;
 const MAP_EXT = HALF + 200; // metros do centro até a borda do mapa
 
@@ -46,7 +52,7 @@ export function createHud(layout) {
     <div class="toast"></div>
     <div class="cross"></div>
     <div class="energy"><i></i></div>
-    <div class="speed"><b>0</b><small>km/h</small><div class="bar"><i></i></div><small class="alt">0 m</small><br><span class="mode">EM PÉ</span></div>
+    <div class="speed"><b>0</b><small class="unit">km/h</small><div class="bar"><i></i></div><small class="alt">0 m</small><br><span class="mode">EM PÉ</span></div>
     <canvas class="map" width="400" height="400"></canvas>
     <div class="help">
       <b>Mouse</b> olhar e mirar<br><b>W A S D</b> voar / andar<br><b>Espaço · C</b> subir · descer<br>
@@ -55,7 +61,7 @@ export function createHud(layout) {
   document.body.appendChild(el);
   const $ = (s) => el.querySelector(s);
   const ui = {
-    speed: $('.speed b'), bar: $('.bar i'), alt: $('.alt'), mode: $('.mode'),
+    speed: $('.speed b'), unit: $('.unit'), bar: $('.bar i'), alt: $('.alt'), mode: $('.mode'),
     objective: $('.objective'), toast: $('.toast'), energy: $('.energy i'), help: $('.help'), map: $('.map'), dust: $('.dust'),
   };
   const ctx = ui.map.getContext('2d');
@@ -64,6 +70,8 @@ export function createHud(layout) {
   let toastTimer = 0;
   let markers = [];
 
+  // Marcadores no espaço (Metrópolis, planetas): nome e distância na tela.
+  const beacons = Array.from({ length: 12 }, () => el.appendChild(Object.assign(document.createElement('div'), { className: 'beacon' })));
   const set = (key, node, value, prop = 'textContent') => {
     if (last[key] === value) return;
     last[key] = value;
@@ -131,6 +139,14 @@ export function createHud(layout) {
     setObjective: (text) => set('obj', ui.objective, text ?? ''),
     setMarkers: (list) => { markers = list; },
     setEnergy: (k) => set('energy', ui.energy.style, `${Math.round(k * 100)}%`, 'width'),
+    // Marcador i em (x, y) px, com o nome e a distância (m); `on` false esconde.
+    setBeacon(i, name, x, y, meters, on) {
+      const b = beacons[i];
+      set(`beaconOn${i}`, b.style, on ? 'block' : 'none', 'display');
+      if (!on) return;
+      b.style.transform = `translate(${x.toFixed(0)}px, ${y.toFixed(0)}px)`;
+      set(`beacon${i}`, b, `${name} · ${NUM0.format(meters / 1000)} km`);
+    },
     // Poeira na tela (0–1) enquanto a câmera atravessa um prédio com o herói.
     setDust: (k) => set('dust', ui.dust.style, k < 0.01 ? '0' : k.toFixed(2), 'opacity'),
     toast(text, seconds = 2) {
@@ -139,12 +155,18 @@ export function createHud(layout) {
       toastTimer = seconds;
     },
     update(dt, flight, groundY) {
-      set('speed', ui.speed, String(Math.round(flight.speed * 3.6)));
-      set('bar', ui.bar.style, `${Math.min(100, (flight.speed / 420) * 100).toFixed(0)}%`, 'width');
-      set('alt', ui.alt, `${Math.max(0, Math.round(flight.pos.y - groundY))} m acima do solo · ${Math.round(flight.pos.y)} m`);
-      const mode = flight.supersonic ? 'super' : flight.pose;
+      // Até 1 km/s em km/h; acima, km/s (e quantas vezes a luz, que em escala real se passa).
+      const sp = flight.speed;
+      const kms = sp / 1000;
+      set('speed', ui.speed, sp < 1000 ? String(Math.round(sp * 3.6)) : (kms < 100 ? NUM1 : NUM0).format(kms));
+      set('unit', ui.unit, sp < 1000 ? 'km/h' : sp > LIGHT ? `km/s · ${NUM1.format(sp / LIGHT)}× a luz` : 'km/s');
+      set('bar', ui.bar.style, `${Math.min(100, (sp / 420) * 100).toFixed(0)}%`, 'width');
+      // No espaço, a altitude é até a superfície da Terra, em km.
+      const space = flight.altitude > 20e3;
+      set('alt', ui.alt, space ? `altitude ${NUM0.format(flight.altitude / 1000)} km` : `${Math.max(0, Math.round(flight.pos.y - groundY))} m acima do solo · ${Math.round(flight.pos.y)} m`);
+      const mode = space && sp > 420 ? 'hyper' : flight.supersonic ? 'super' : flight.pose;
       set('mode', ui.mode, MODE_LABEL[mode]);
-      set('modeCls', ui.mode, mode === 'super' ? 'mode super' : 'mode', 'className');
+      set('modeCls', ui.mode, mode === 'super' || mode === 'hyper' ? `mode ${mode}` : 'mode', 'className');
       if (toastTimer > 0 && (toastTimer -= dt) <= 0) ui.toast.classList.remove('on');
       drawMap(flight);
     },

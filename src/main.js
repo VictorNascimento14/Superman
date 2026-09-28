@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { createRenderer } from './render/renderer.js';
 import { createSky, TIME_ORDER } from './render/sky.js';
 import { createPost } from './render/post.js';
+import { createSpace } from './space/space.js';
 import { QUALITY, pickQuality } from './render/quality.js';
 import { generateLayout, collisionBoxes, WATER_Y } from './world/layout.js';
 import { createCollisionWorld } from './world/collision.js';
@@ -37,11 +38,29 @@ world.add(camera);
 const origin = new THREE.Vector3();
 const FLOAT_FROM = 20e3; // m do centro da cidade: além disto, a origem acompanha o herói
 const lookAtV = new THREE.Vector3();
+const beaconV = new THREE.Vector3();
+// Marcador na tela para um ponto verdadeiro (referencial da cidade): fora de vista, fica preso
+// à borda, apontando para onde virar.
+function beacon(i, name, x, y, z) {
+  const meters = beaconV.set(x, y, z).distanceTo(flight.pos);
+  // Atrás da câmera é z > 0 em espaço de câmera. Depois da projeção não dá para saber: ponto
+  // além do far (a cidade a 7.000 km) também sai com z > 1.
+  beaconV.set(x, y, z).sub(origin).applyMatrix4(camera.matrixWorldInverse);
+  const behind = beaconV.z > 0;
+  beaconV.applyMatrix4(camera.projectionMatrix);
+  let sx = beaconV.x;
+  let sy = beaconV.y;
+  if (behind) { sx = -sx; sy = -sy; }
+  const m = Math.max(Math.abs(sx), Math.abs(sy), 1e-6);
+  if (behind || m > 0.92) { sx *= 0.92 / m; sy *= 0.92 / m; }
+  hud.setBeacon(i, name, ((sx + 1) / 2) * window.innerWidth, ((1 - sy) / 2) * window.innerHeight, meters, true);
+}
 const sky = createSky(scene, renderer, preset, world);
-const post = createPost(renderer, scene, camera, preset);
-post.setExposure(sky.state.exposure);
 
 const layout = generateLayout();
+const space = createSpace({ park: layout.park });
+const post = createPost(renderer, scene, camera, preset, space);
+post.setExposure(sky.state.exposure);
 const collision = createCollisionWorld(collisionBoxes(layout), { floor: WATER_Y });
 const city = createCity(world, layout, renderer);
 const traffic = createTraffic();
@@ -200,11 +219,28 @@ renderer.setAnimationLoop(() => {
   hud.setEnergy(heatVision.energy.value);
   const groundY = collision.heightAt(flight.pos.x, flight.pos.z);
   hud.update(dt, flight, groundY);
-  audio.update(paused ? 0 : flight.speed, flight.pos.y - groundY, heatVision.firing, heatVision.hitting);
+  // Espaço: o céu esmaece de 4 km a 40 km de altitude, e abaixo do horizonte já de 2,5 a 4 km.
+  // Acima de 2,5 km a cena do espaço é desenhada antes da cidade, que sai de vista aos 4 km
+  // (a neblina já a apagou); dali para cima, Metrópolis é a ilha desenhada no globo.
+  // No vácuo não há vento.
+  const alt = flight.altitude;
+  const spaceK = THREE.MathUtils.smoothstep(alt, 4e3, 40e3);
+  sky.setSpace(spaceK, THREE.MathUtils.smoothstep(alt, 2.5e3, 4e3));
+  city.group.visible = alt < 4e3;
+  // A neblina foi pensada para olhar na horizontal; de cima, o ar é fino e a cidade aparece.
+  scene.fog.near = 700 + alt * 0.6;
+  scene.fog.far = preset.viewDistance * 1.2 + alt * 1.6;
+  post.setSpace(alt > 2.5e3);
+  audio.update(paused ? 0 : flight.speed * (1 - spaceK), flight.pos.y - groundY, heatVision.firing, heatVision.hitting);
   sky.update(dt, flight.pos, elapsed);
   city.update(dt, elapsed, sky.state.night);
   traffic.update(dt);
   trafficView.update(sky.state.night, elapsed, camera.position);
+  if (alt > 2.5e3) space.update(camera, camera.position, sky.state.sunTrue, elapsed);
+  // No espaço, Metrópolis vira um marcador: lá de cima a ilha tem menos de um pixel.
+  camera.updateMatrixWorld();
+  if (alt > 20e3) beacon(0, 'METRÓPOLIS', 0, 0, 0);
+  else hud.setBeacon(0, '', 0, 0, 0, false);
   post.render(dt);
 });
 
@@ -224,6 +260,7 @@ window.__game = {
   missions,
   destruction: breachFx,
   collapses,
+  space,
   audio,
   heat: (on) => { debug.heat = on; },
   autopilot: (m) => { debug.autopilot = m ? { forward: 0, right: 0, up: 0, boost: false, jump: false, ...m } : null; },
