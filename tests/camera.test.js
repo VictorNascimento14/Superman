@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { PerspectiveCamera, Vector3 } from 'three';
+import { PerspectiveCamera, Vector3, Group, Quaternion } from 'three';
 import { createChaseCamera } from '../src/player/camera.js';
 import { createCollisionWorld } from '../src/world/collision.js';
 
@@ -21,4 +21,29 @@ test('câmera: encostado numa parede à direita, não entra no prédio', () => {
     const p = camera.position;
     assert.ok(!inside(p), `mirando=${aiming}: câmera dentro do prédio em (${p.x.toFixed(2)}, ${p.y.toFixed(2)}, ${p.z.toFixed(2)})`);
   }
+});
+
+test('câmera: com a origem flutuante longe (10⁹ m), a imagem sai idêntica', () => {
+  // O mundo vive num grupo deslocado por −origem; a câmera é filha dele. Em espaço de render
+  // tudo tem de bater com o mesmo voo perto da cidade — e com números pequenos.
+  const empty = createCollisionWorld([]);
+  const shoot = (far) => {
+    const world = new Group();
+    const camera = new PerspectiveCamera(62, 16 / 9, 0.3, 6000);
+    world.add(camera);
+    world.position.set(-far, 0, 0);
+    world.updateMatrixWorld();
+    const chase = createChaseCamera(camera, empty);
+    const flight = { pos: new Vector3(far, 20, 0), yaw: 0.7, pitch: -0.2, speed: 30, mode: 'air' };
+    for (let i = 0; i < 90; i++) {
+      chase.update(1 / 60, flight);
+      world.updateMatrixWorld();
+    }
+    return { p: new Vector3().setFromMatrixPosition(camera.matrixWorld), q: camera.getWorldQuaternion(new Quaternion()) };
+  };
+  const near = shoot(0);
+  const far = shoot(1e9);
+  assert.ok(far.p.distanceTo(near.p) < 1e-6, `posição de render: ${far.p.toArray()} × ${near.p.toArray()}`);
+  assert.ok(far.p.length() < 100, `longe da origem de render: ${far.p.length()} m`); // o herói está a 20 m de altura
+  assert.ok(Math.abs(far.q.dot(near.q)) > 1 - 1e-9, 'orientação diferente');
 });

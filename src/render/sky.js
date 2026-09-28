@@ -15,11 +15,13 @@ const SHADOW_BOX = 260; // meia-aresta da caixa de sombra que acompanha o herói
 // trecho antes do `near`, e as sombras de lá sumiam e piscavam. A 2000 m, com far 3000, cabe.
 const LIGHT_DIST = 2000;
 
-export function createSky(scene, renderer, preset) {
+// `world`: onde moram céu, luzes e estrelas (o grupo da origem flutuante). Neblina e mapa de
+// ambiente são da cena de verdade — num grupo, o renderer os ignora.
+export function createSky(scene, renderer, preset, world = scene) {
   const sky = new Sky();
   sky.scale.setScalar(4000);
   sky.frustumCulled = false;
-  scene.add(sky);
+  world.add(sky);
   const u = sky.material.uniforms;
   u.mieCoefficient.value = 0.004;
   u.mieDirectionalG.value = 0.8;
@@ -38,13 +40,13 @@ export function createSky(scene, renderer, preset) {
   // céu é esta cúpula de gradiente (poluição luminosa da cidade no horizonte).
   const nightDome = makeNightDome();
   const envNightDome = new THREE.Mesh(nightDome.geometry, nightDome.material);
-  scene.add(nightDome);
+  world.add(nightDome);
   envScene.add(envNightDome);
   const pmrem = new THREE.PMREMGenerator(renderer);
   let envRT = null;
 
   const hemi = new THREE.HemisphereLight(0xbfd8ff, 0x3a3530, 0.8);
-  scene.add(hemi);
+  world.add(hemi);
 
   const sun = new THREE.DirectionalLight(0xffffff, 3);
   sun.castShadow = preset.shadows;
@@ -54,12 +56,12 @@ export function createSky(scene, renderer, preset) {
   sc.near = 10; sc.far = 3000;
   sun.shadow.bias = -0.0002; // em profundidade normalizada: ~0,6 m no mundo com este far
   sun.shadow.normalBias = 0.6;
-  scene.add(sun, sun.target);
+  world.add(sun, sun.target);
 
   scene.fog = new THREE.Fog(0xb8c8dc, 700, preset.viewDistance * 1.2);
 
   const stars = makeStars();
-  scene.add(stars);
+  world.add(stars);
 
   const sunDir = new THREE.Vector3();
   // Eixos da câmera de sombra (olha ao longo de −sunDir, com o up padrão): a grade de texel

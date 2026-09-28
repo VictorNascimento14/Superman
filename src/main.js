@@ -27,21 +27,31 @@ const preset = QUALITY[qualityName];
 const renderer = createRenderer(app, preset);
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.3, 6000);
-const sky = createSky(scene, renderer, preset);
+// Origem flutuante: tudo que tem posição no mundo mora em `world`, deslocado por −origem. A
+// GPU trabalha em float32 e, longe da cidade (no espaço, a 10¹¹ m do Sol), posição absoluta
+// perderia metros ou quilômetros de precisão. Perto da cidade a origem é zero: nada muda.
+const world = new THREE.Group();
+world.name = 'mundo';
+scene.add(world);
+world.add(camera);
+const origin = new THREE.Vector3();
+const FLOAT_FROM = 20e3; // m do centro da cidade: além disto, a origem acompanha o herói
+const lookAtV = new THREE.Vector3();
+const sky = createSky(scene, renderer, preset, world);
 const post = createPost(renderer, scene, camera, preset);
 post.setExposure(sky.state.exposure);
 
 const layout = generateLayout();
 const collision = createCollisionWorld(collisionBoxes(layout), { floor: WATER_Y });
-const city = createCity(scene, layout, renderer);
+const city = createCity(world, layout, renderer);
 const traffic = createTraffic();
-const trafficView = createTrafficView(scene, traffic);
-const hero = createHero(scene);
-const shockwaves = createShockwaves(scene);
-const breachFx = createBreachFx(scene);
-const heatVision = createHeatVision(scene, hero, collision, camera);
+const trafficView = createTrafficView(world, traffic);
+const hero = createHero(world);
+const shockwaves = createShockwaves(world);
+const breachFx = createBreachFx(world);
+const heatVision = createHeatVision(world, hero, collision, camera);
 const collapses = createCollapses({
-  scene, city, layout, collision, fx: breachFx,
+  scene: world, city, layout, collision, fx: breachFx,
   clearMarks: (box) => { breachFx.clearMarks(box); heatVision.clearMarks(box); },
 });
 
@@ -55,7 +65,7 @@ const input = createInput(renderer.domElement);
 const move = { forward: 0, right: 0, up: 0, boost: false, jump: false };
 
 const hud = createHud(layout);
-const missions = createMissions({ scene, collision, layout, heatVision, hud });
+const missions = createMissions({ scene: world, collision, layout, heatVision, hud });
 missions.setBaseMarkers([{ x: planet.x, z: planet.z, color: '#e8e8e8' }]);
 input.onKey('KeyH', () => hud.toggleHelp());
 input.onKey('KeyN', () => missions.skip());
@@ -130,6 +140,10 @@ renderer.setAnimationLoop(() => {
     missions.update(dt, flight, prevPos, elapsed);
     if (debug.autopilot) debug.autopilot.jump = false;
   }
+  // Antes de qualquer conversão entre espaço de render e verdadeiro (capa, câmera, feixes).
+  origin.copy(flight.pos.lengthSq() > FLOAT_FROM * FLOAT_FROM ? flight.pos : lookAtV.set(0, 0, 0));
+  world.position.copy(origin).negate();
+  world.updateWorldMatrix(false, false);
   for (const e of flight.events) {
     if (e.type === 'sonicboom') {
       shockwaves.spawn(e.at, flight.vel.clone().normalize());
@@ -171,7 +185,7 @@ renderer.setAnimationLoop(() => {
 
   if (debug.cam) {
     camera.position.copy(flight.pos).add(debug.cam);
-    camera.lookAt(flight.pos);
+    camera.lookAt(world.localToWorld(lookAtV.copy(flight.pos))); // lookAt quer espaço de render
   } else chase.update(dt, flight, heatVision.firing);
 
   // Câmera dentro de um prédio (atravessando junto com o herói): poeira na tela. As paredes

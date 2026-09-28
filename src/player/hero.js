@@ -315,8 +315,11 @@ function createCape(rig, mat) {
   let ready = false;
   let acc = 0;
 
+  // Tudo da capa no espaço do pai do herói (o mundo, que a origem flutuante desloca): os
+  // pinos saem do matrixWorld (espaço de render) e voltam para ele.
+  const toParent = (v) => rig.root.parent.worldToLocal(v);
   function computeAnchors() {
-    for (let c = 0; c < CAPE.cols; c++) anchorW[c].copy(anchorsLocal[c]).applyMatrix4(rig.chest.matrixWorld);
+    for (let c = 0; c < CAPE.cols; c++) toParent(anchorW[c].copy(anchorsLocal[c]).applyMatrix4(rig.chest.matrixWorld));
     origin.copy(anchorW[Math.floor(CAPE.cols / 2)]);
   }
 
@@ -355,9 +358,9 @@ function createCape(rig, mat) {
     air[0] = -velocity.x * s + Math.sin(t * 7.1) * 2.5 * gust;
     air[1] = -velocity.y * s + Math.sin(t * 5.3) * 2 * gust;
     air[2] = -velocity.z * s + Math.cos(t * 6.7) * 2.5 * gust;
-    tmp.set(0, 0, 0).applyMatrix4(rig.pelvis.matrixWorld);
+    toParent(tmp.set(0, 0, 0).applyMatrix4(rig.pelvis.matrixWorld));
     bodyA.copy(tmp).sub(origin);
-    tmp.set(0, 0.45, -0.02).applyMatrix4(rig.chest.matrixWorld);
+    toParent(tmp.set(0, 0.45, -0.02).applyMatrix4(rig.chest.matrixWorld));
     bodyB.copy(tmp).sub(origin);
     seg.subVectors(bodyB, bodyA);
     for (let c = 0; c < CAPE.cols; c++) cloth.setPin(c, anchorW[c].x - origin.x, anchorW[c].y - origin.y, anchorW[c].z - origin.z);
@@ -366,15 +369,11 @@ function createCape(rig, mat) {
       cloth.step(SUBSTEP, gravity, air, 3 + Math.min(sp, 60) * 0.12, 5, collide);
       acc -= SUBSTEP;
     }
-    // Direto nos arrays: o setXYZ encaixota os doubles dos argumentos, e o computeVertexNormals
-    // varre os 132 triângulos alocando — juntos, ~1 MB/s.
-    const posArr = geo.attributes.position.array;
-    for (let i = 0; i < cloth.pos.length; i += 3) {
-      posArr[i] = cloth.pos[i] + origin.x;
-      posArr[i + 1] = cloth.pos[i + 1] + origin.y;
-      posArr[i + 2] = cloth.pos[i + 2] + origin.z;
-    }
+    // Vértices relativos ao mesh, que fica na origem da capa: posição absoluta num Float32Array
+    // perderia precisão longe da cidade. Direto no array: o setXYZ encaixota os doubles.
+    geo.attributes.position.array.set(cloth.pos);
     geo.attributes.position.needsUpdate = true;
+    mesh.position.copy(origin);
     gridNormals(cloth.pos, CAPE.cols, CAPE.rows, geo.attributes.normal.array);
     geo.attributes.normal.needsUpdate = true;
   }

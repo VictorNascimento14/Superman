@@ -61,7 +61,9 @@ export function createChaseCamera(camera, collision) {
       camera.position.y += Math.sin(t * 53 + 1) * sh * 0.8;
       camera.position.z += Math.sin(t * 59 + 2) * sh * 0.8;
     }
-    camera.lookAt(target.addScaledVector(dir, 4));
+    // lookAt quer o ponto em espaço de render: com a origem flutuante, o pai desloca o mundo.
+    const look = target.addScaledVector(dir, 4);
+    camera.lookAt(camera.parent ? camera.parent.localToWorld(look) : look);
   }
 
   return { update, shake: (a) => { trauma = Math.min(1, trauma + a); } };
