@@ -68,6 +68,14 @@ npm run build   # vite build
 
 O CI (`.github/workflows/ci.yml`) roda os dois em todo PR. Mudou código → rode os dois antes de commitar.
 
+```bash
+npm run e2e     # build + Chrome headless + autopiloto cumpre as 3 missões (~90 s)
+```
+
+O `e2e` não roda no CI (precisa de GPU/Chrome da máquina). **Rode-o antes de publicar PR que mexa em
+voo, câmera, colisão, visão de calor ou missões** — é ele que prova que o jogo continua cumprível.
+Screenshots ficam em `e2e-out/` (fora do git). Chrome em outro caminho: `CHROME_PATH=...`.
+
 ### Invariantes
 
 1. **60 fps em GPU integrada no preset médio.** Geometria repetida é `InstancedMesh` ou merge; nada de

@@ -234,6 +234,7 @@ export function createMissions({ scene, collision, layout, heatVision, hud }) {
     skip: () => { if (m) end(false); },
     setBaseMarkers: (list) => { baseMarkers = list; },
     get score() { return score; },
+    get done() { return done; },
     get current() { return m; },
   };
 }
