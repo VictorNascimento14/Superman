@@ -68,21 +68,39 @@ export function createTrafficView(scene, traffic) {
   const s = new THREE.Vector3(1, 1, 1);
   const up = new THREE.Vector3(0, 1, 0);
 
+  // Recorte por distância: só as instâncias perto da câmera vão para a GPU, compactadas
+  // no começo do buffer. Pedestre a 300 m tem menos de um pixel; carro a 900 m, dois.
+  const CAR_R2 = 900 * 900;
+  const PED_R2 = 300 * 300;
+  const carColor = new Float32Array(cars.instanceColor.array);
+  const pedColor = new Float32Array(peds.instanceColor.array);
+
   return {
-    update(night, t) {
+    update(night, t, eye) {
+      let n = 0;
       traffic.cars.forEach((c, i) => {
+        if ((c.x - eye.x) ** 2 + (c.z - eye.z) ** 2 > CAR_R2) return;
         q.setFromAxisAngle(up, c.yaw);
         m.compose(p.set(c.x, 0, c.z), q, s);
-        cars.setMatrixAt(i, m);
-        lights.setMatrixAt(i, m);
+        cars.setMatrixAt(n, m);
+        lights.setMatrixAt(n, m);
+        cars.instanceColor.array.set(carColor.subarray(i * 3, i * 3 + 3), n * 3);
+        n++;
       });
+      cars.count = lights.count = n;
+      n = 0;
       traffic.peds.forEach((pd, i) => {
+        if ((pd.x - eye.x) ** 2 + (pd.z - eye.z) ** 2 > PED_R2) return;
         q.setFromAxisAngle(up, pd.yaw);
         // Balanço do passo: sobe e desce de leve.
         m.compose(p.set(pd.x, 0.15 + Math.abs(Math.sin(t * 7 + pd.phase)) * 0.05, pd.z), q, s);
-        peds.setMatrixAt(i, m);
+        peds.setMatrixAt(n, m);
+        peds.instanceColor.array.set(pedColor.subarray(i * 3, i * 3 + 3), n * 3);
+        n++;
       });
+      peds.count = n;
       cars.instanceMatrix.needsUpdate = lights.instanceMatrix.needsUpdate = peds.instanceMatrix.needsUpdate = true;
+      cars.instanceColor.needsUpdate = peds.instanceColor.needsUpdate = true;
       // Faróis: apagados (cor escura) de dia; em HDR à noite para o bloom pegar.
       lightMat.color.setScalar(0.25 + night * 3.5);
     },

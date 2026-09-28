@@ -150,7 +150,7 @@ renderer.setAnimationLoop(() => {
   sky.update(dt, flight.pos, elapsed);
   city.update(dt, elapsed, sky.state.night);
   traffic.update(dt);
-  trafficView.update(sky.state.night, elapsed);
+  trafficView.update(sky.state.night, elapsed, camera.position);
   post.render(dt);
 });
 
