@@ -72,6 +72,7 @@ export function createHeatVision(scene, hero, collision, camera) {
   const s = new THREE.Vector3();
   const n = new THREE.Vector3();
   const back = new THREE.Vector3();
+  const aimW = new THREE.Vector3();
   const zAxis = new THREE.Vector3(0, 0, 1);
 
   function addScorch(p, normal) {
@@ -142,11 +143,13 @@ export function createHeatVision(scene, hero, collision, camera) {
     const { target, surface } = trace();
     hitting = surface || !!target;
     hero.eyes.forEach((e, k) => {
-      e.getWorldPosition(eye);
+      // Olho e mira no mesmo espaço (o do mundo, que a origem flutuante desloca); o lookAt quer
+      // espaço de render.
+      scene.worldToLocal(e.getWorldPosition(eye));
       const b = beams[k];
       b.visible = true;
       b.position.copy(eye);
-      b.lookAt(aim);
+      b.lookAt(scene.localToWorld(aimW.copy(aim)));
       b.scale.z = eye.distanceTo(aim);
       // Tremor fino no raio: calor não é linha de laser.
       const j = 1 + Math.sin(performance.now() * 0.05 + k) * 0.15;

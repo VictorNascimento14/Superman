@@ -101,6 +101,20 @@ try {
   }), smash.bi);
   console.log(`desabar: desabou ${fall.collapsed}, em andamento ${fall.active}, teto ${fall.top.toFixed(1)} m`);
   if (!fall.collapsed || fall.active || fall.top > 3.01) { console.error('Desabamento falhou.'); failed = true; }
+  // Origem flutuante: a 5·10⁸ m da cidade, a câmera fica perto da origem de render (a GPU
+  // trabalha em float32) e nada quebra.
+  const far = await page.evaluate(() => new Promise((resolve) => {
+    const g = window.__game;
+    g.autopilot({});
+    g.heat(true);
+    g.flight.mode = 'air';
+    g.flight.vel.set(0, 0, 0);
+    g.flight.pos.set(5e8, 300, -2e8);
+    setTimeout(() => resolve(g.camera.getWorldPosition(g.flight.pos.clone()).length()), 1000);
+  }));
+  await page.screenshot({ path: `${OUT}/longe.png` });
+  console.log(`origem flutuante: câmera a ${far.toFixed(1)} m da origem de render, a 5·10⁸ m da cidade`);
+  if (far > 100) { console.error('Origem flutuante falhou.'); failed = true; }
   if (errors.length) { console.error('Erros no console:\n' + errors.join('\n')); failed = true; }
   const missing = Object.entries(state?.doneBy ?? { aneis: 0, resgate: 0, drones: 0 }).filter(([, n]) => !n).map(([k]) => k);
   if (missing.length) { console.error(`Sem vitória em ${LIMIT_S} s: ${missing.join(', ')}.`); failed = true; }
