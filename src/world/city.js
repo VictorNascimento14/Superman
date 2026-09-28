@@ -14,7 +14,7 @@ function shadowed(mesh, cast = true) {
   return mesh;
 }
 
-export function createCity(scene, layout, renderer) {
+export function createCity(scene, layout, renderer, openings = null) {
   const tex = createTextures(renderer);
   const group = new THREE.Group();
   group.name = 'cidade';
@@ -57,6 +57,10 @@ export function createCity(scene, layout, renderer) {
       map: f.map, emissiveMap: f.emissiveMap, emissive: 0xffffff, emissiveIntensity: 0,
       roughnessMap: f.rmMap, metalnessMap: f.rmMap, roughness: 1, metalness: 1, vertexColors: true,
     });
+    openings?.patch(m, 'attr'); // furos de verdade nos prédios com interior montado
+    // As paredes têm face única: por padrão só a face de trás entra no mapa de sombra, e quem
+    // fazia sombra era a parede do fundo — o miolo do prédio (o interior) ficava ao sol.
+    m.shadowSide = THREE.DoubleSide;
     windowMats.push(m);
     matByStyle[s] = m;
     wallGeos[s] = walls[s].build();
@@ -88,6 +92,17 @@ export function createCity(scene, layout, renderer) {
       dirty(wg.attributes.uv, t.wall * 2, 32);
       dirty(roofGeo.attributes.position, t.roof * 3, 12);
       if (t.trim >= 0) dirty(trimGeo.attributes.position, t.trim * 3, 48);
+    }
+  }
+
+  // Liga (ou desliga) o recorte dos furos nas paredes do prédio `bi`: ligado enquanto ele tem
+  // interior montado. Só as faixas de vértices dele sobem para a GPU.
+  function setOpen(bi, on) {
+    const r = refs[bi];
+    const a = wallGeos[r.style].attributes.open;
+    for (const t of r.tiers) {
+      a.array.fill(on ? 1 : 0, t.wall, t.wall + 16);
+      dirty(a, t.wall, 16);
     }
   }
 
@@ -175,7 +190,7 @@ export function createCity(scene, layout, renderer) {
     tex.waterNormals.offset.set(time * 0.004, time * 0.0025);
   }
 
-  return { group, update, refs, setTop, makePart, roofProps: (bi) => props.byBuilding[bi] };
+  return { group, update, refs, setTop, setOpen, makePart, roofProps: (bi) => props.byBuilding[bi] };
 }
 
 // Um nível de prédio: paredes, telhado e, fora o vidro, a cornija — faixa saliente no topo,

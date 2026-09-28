@@ -78,7 +78,7 @@ export function createCollapses({ scene, city, layout, collision, fx, clearMarks
     clearMarks(footprint(bi, cut));
     const axis = new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize();
     active.push({ bi, cut, part, props, axis, baseInv: part.matrixWorld.clone().invert(), height: b.h - cut, v: 0, drop: 0, t: 0, puff: 0 });
-    events.push({ type: 'collapse', at: new THREE.Vector3(b.x, cut, b.z), height: b.h - cut });
+    events.push({ type: 'collapse', building: bi, at: new THREE.Vector3(b.x, cut, b.z), height: b.h - cut });
   }
 
   // Poeira e entulho saindo pelos lados na linha de esmagamento, mais forte quanto mais rápido.

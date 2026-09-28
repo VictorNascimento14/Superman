@@ -14,7 +14,7 @@ const Z = new THREE.Vector3(0, 0, 1);
 const CONCRETE = [0x8d877c, 0x6f6a62, 0xa39c8f, 0x5a554e, 0x9a8f7d];
 const GLASS = 0x9fc4d8;
 
-export function createBreachFx(scene) {
+export function createBreachFx(scene, openings = null) {
   const m = new THREE.Matrix4();
   const q = new THREE.Quaternion();
   const spinQ = new THREE.Quaternion();
@@ -33,6 +33,9 @@ export function createBreachFx(scene) {
   );
   holes.count = 0;
   holes.frustumCulled = false;
+  // Nos prédios com interior montado o furo é aberto de verdade: o miolo do decalque é recortado
+  // junto com a parede, e fica só a borda de concreto quebrado.
+  openings?.patch(holes.material, 'always');
   scene.add(holes);
   let holeNext = 0;
 
@@ -104,9 +107,10 @@ export function createBreachFx(scene) {
     dustPeak[i] = peak;
   }
 
-  // Estouro genérico (desabamento): `count` pedaços saindo de (x, y, z) com velocidade base
-  // (vx, vy, vz), espalhamento `spread` e tamanho até `sizeMax`.
-  function burst(x, y, z, vx, vy, vz, count, spread, sizeMax) {
+  // Estouro genérico (desabamento, interior quebrado): `count` pedaços saindo de (x, y, z) com
+  // velocidade base (vx, vy, vz), espalhamento `spread`, tamanho até `sizeMax` e, se dada, a cor
+  // do que quebrou (senão concreto e vidro).
+  function burst(x, y, z, vx, vy, vz, count, spread, sizeMax, color = null) {
     for (let i = 0; i < count; i++) {
       const s = 0.3 + Math.random() ** 2 * (sizeMax - 0.3);
       const idx = debris.spawn(
@@ -114,14 +118,17 @@ export function createBreachFx(scene) {
         vx + (Math.random() - 0.5) * spread, vy + Math.random() * 3, vz + (Math.random() - 0.5) * spread,
         s, (Math.random() - 0.5) * 6, (Math.random() - 0.5) * 6, (Math.random() - 0.5) * 6,
       );
-      chunks.setColorAt(idx, col.set(Math.random() < 0.12 ? GLASS : CONCRETE[(Math.random() * CONCRETE.length) | 0]));
+      if (color !== null) col.set(color).multiplyScalar(0.8 + Math.random() * 0.3);
+      else col.set(Math.random() < 0.12 ? GLASS : CONCRETE[(Math.random() * CONCRETE.length) | 0]);
+      chunks.setColorAt(idx, col);
     }
     chunks.instanceColor.needsUpdate = true;
   }
 
   // Um furo por evento (entrada ou saída), com entulho e poeira proporcionais à velocidade.
+  // Devolve onde o furo ficou (centro, normal da face e raio da abertura), ou null.
   function spawn(e) {
-    if (e.at.y < -1) return; // nível que já desabou (a caixa foi para debaixo da terra)
+    if (e.at.y < -1) return null; // nível que já desabou (a caixa foi para debaixo da terra)
     breaches++;
     const exit = !e.entry;
     const k = Math.min(1, e.speed / 200);
@@ -165,6 +172,8 @@ export function createBreachFx(scene) {
         n.x * (1.5 + Math.random() * 2) + e.dir.x * push, n.y * (1.5 + Math.random() * 2) + e.dir.y * push + 0.6, n.z * (1.5 + Math.random() * 2) + e.dir.z * push,
       );
     }
+    // A abertura é o miolo escuro do decalque (~30% do tamanho dele); a borda fica em volta.
+    return { x: e.at.x, y: e.at.y, z: e.at.z, nx: n.x, ny: n.y, nz: n.z, r: size * 0.3 };
   }
 
   // viewHeight: altura do canvas em pixels, para a poeira ter tamanho em metros.

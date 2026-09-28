@@ -87,11 +87,16 @@ try {
     const shot = window.__launch(Infinity, 150);
     setTimeout(() => {
       const after = g.destruction.stats();
-      resolve({ bi: shot.bi, breaches: after.breaches - before.breaches, debris: after.debris - before.debris, passed: shot.passed() });
+      const inside = g.interiors.stats();
+      resolve({
+        bi: shot.bi, breaches: after.breaches - before.breaches, debris: after.debris - before.debris, passed: shot.passed(),
+        interior: inside.active.includes(shot.bi), broken: inside.broken, open: g.openings.list.filter((o) => o.building === shot.bi).length,
+      });
     }, 1200);
   }));
-  console.log(`atravessar: ${smash.breaches} rupturas, ${smash.debris} pedaços de entulho, passou: ${smash.passed}`);
+  console.log(`atravessar: ${smash.breaches} rupturas, ${smash.debris} pedaços de entulho, passou: ${smash.passed}; interior montado: ${smash.interior}, ${smash.broken} peças quebradas lá dentro, ${smash.open} furos abertos`);
   if (smash.breaches < 2 || smash.debris < 10 || !smash.passed) { console.error('Atravessar prédio falhou.'); failed = true; }
+  if (!smash.interior || smash.broken < 1 || smash.open < 2) { console.error('Interior do prédio falhou.'); failed = true; }
   // Desabar: supersônico num prédio estreito, uma passada basta; a parte de cima cai e sobra
   // o toco (teto da colisão na altura dos escombros).
   const fall = await page.evaluate(() => new Promise((resolve) => {

@@ -9,6 +9,8 @@ import { QUALITY, pickQuality } from './render/quality.js';
 import { generateLayout, collisionBoxes, WATER_Y } from './world/layout.js';
 import { createCollisionWorld } from './world/collision.js';
 import { createCity } from './world/city.js';
+import { createOpenings } from './world/openings.js';
+import { createInteriors, PIECE_COLOR } from './world/interiors.js';
 import { createTraffic } from './world/traffic.js';
 import { createTrafficView } from './world/trafficView.js';
 import { createHero } from './player/hero.js';
@@ -79,12 +81,18 @@ const space = createSpace({ park: layout.park });
 const post = createPost(renderer, scene, camera, preset, space);
 post.setExposure(sky.state.exposure);
 const collision = createCollisionWorld(collisionBoxes(layout), { floor: WATER_Y });
-const city = createCity(world, layout, renderer);
+const openings = createOpenings();
+const city = createCity(world, layout, renderer, openings);
 const traffic = createTraffic();
 const trafficView = createTrafficView(world, traffic);
 const hero = createHero(world);
 const shockwaves = createShockwaves(world);
-const breachFx = createBreachFx(world);
+const breachFx = createBreachFx(world, openings);
+const interiors = createInteriors(world, layout, openings, city);
+let insideBi = -1; // o último prédio em que o herói entrou
+// Quebrar uma peça do interior: quantos pedaços e de que tamanho, por tipo.
+const SMASH_BITS = { column: [6, 0.8], core: [5, 1], wall: [4, 0.8], desk: [3, 0.6], cabinet: [3, 0.6], light: [2, 0.4] };
+const SMASH_R = 2.2; // m: o que o herói arrebenta em volta do caminho (pega mesa e luminária em qualquer altura)
 const heatVision = createHeatVision(world, hero, collision, camera);
 const solar = createSolar();
 const pierce = createPierce();
@@ -206,8 +214,15 @@ renderer.setAnimationLoop(() => {
       hud.toast('BARREIRA DO SOM');
       audio.sonicBoom();
     } else if (e.type === 'breach') {
-      // Furou a fachada (entrada) ou saiu do outro lado: a saída espalha mais entulho.
-      breachFx.spawn(e);
+      // Furou a fachada (entrada) ou saiu do outro lado: a saída espalha mais entulho. Ao entrar,
+      // o prédio ganha o interior em volta de onde o herói passou, e os furos abrem de verdade.
+      const bi = collision.boxes[e.box].building;
+      if (e.entry && bi !== undefined) {
+        interiors.activate(bi, e.at.y);
+        insideBi = bi;
+      }
+      const hole = breachFx.spawn(e);
+      if (hole && interiors.isActive(bi)) openings.add(bi, hole);
       collapses.onBreach(e);
       chase.shake(Math.min(1, e.speed / (e.entry ? 160 : 240)));
       audio.breach(Math.min(1, e.speed / 200), e.entry);
@@ -218,12 +233,29 @@ renderer.setAnimationLoop(() => {
     else if (e.type === 'supersonic') chase.shake(0.3);
   }
   flight.events.length = 0;
+  // Lá dentro, o herói arrebenta divisórias, móveis, luminárias e pilares no caminho; se ele sair
+  // da faixa de andares montada (mergulhando), ela acompanha.
+  if (flight.inside && insideBi >= 0) {
+    interiors.activate(insideBi, flight.pos.y);
+    const v = flight.vel;
+    const broken = interiors.smash(prevPos, flight.pos, SMASH_R);
+    for (let i = 0; i < broken.length; i++) {
+      const c = broken[i];
+      const [count, size] = SMASH_BITS[c.kind];
+      const x = (c.minX + c.maxX) / 2;
+      const y = (c.minY + c.maxY) / 2;
+      const z = (c.minZ + c.maxZ) / 2;
+      breachFx.burst(x, y - 1, z, v.x * 0.5, v.y * 0.5, v.z * 0.5, count, 1.5, size, PIECE_COLOR[c.kind]);
+      if (c.kind === 'wall' || c.kind === 'core' || c.kind === 'column') breachFx.puff(x, y, z, v.x * 0.05, 0.4, v.z * 0.05, 8, 2.5, 0.45);
+    }
+  }
   for (const e of missions.events) audio[e.type]?.();
   collapses.update(dt);
   for (const e of collapses.events) {
     // Mais perto, mais tremor: o ronco de um prédio inteiro caindo se sente de longe.
     const near = Math.max(0, 1 - e.at.distanceTo(flight.pos) / 700);
     if (e.type === 'collapse') {
+      interiors.remove(e.building); // a parte de cima caiu: o interior não fica no ar
       audio.collapse(near);
       chase.shake(0.3 + 0.7 * near);
       hud.toast('DESABOU!', 1.5);
@@ -247,7 +279,10 @@ renderer.setAnimationLoop(() => {
   // são cascas de face única e, lá de dentro, a cidade apareceria "de raio-x". O chão da cidade
   // só existe no mundo plano: abaixo do plano dela, em Júpiter, não há prédio nenhum.
   const inside = nearCity(camera.position) && collision.heightAt(camera.position.x, camera.position.z) > camera.position.y;
-  dustLevel = inside ? 1 : dustLevel * Math.exp(-dt * 4);
+  // Com o interior montado dá para ver lá dentro: a poeira na tela fica leve.
+  let dustWant = 0;
+  if (inside) dustWant = insideBi >= 0 && interiors.isActive(insideBi) ? 0.12 : 1;
+  dustLevel = inside ? Math.max(dustWant, dustLevel * Math.exp(-dt * 4)) : dustLevel * Math.exp(-dt * 4);
   hud.setDust(dustLevel);
 
   // A mira sai da câmera: atualizar depois dela. Botão direito ou F.
@@ -304,6 +339,7 @@ renderer.setAnimationLoop(() => {
   audio.update(paused ? 0 : flight.speed * (1 - spaceK), nearCity(flight.pos) ? flight.pos.y - groundY : flight.altitude, heatVision.firing, heatVision.hitting);
   sky.update(dt, flight.pos, elapsed);
   city.update(dt, elapsed, sky.state.night);
+  interiors.update(sky.state.night);
   traffic.update(dt);
   trafficView.update(sky.state.night, elapsed, camera.position);
   if (alt > 2.5e3) space.update(camera, camera.position, elapsed, (camera.fov * THREE.MathUtils.DEG2RAD) / window.innerHeight);
@@ -338,6 +374,8 @@ window.__game = {
   pierce,
   missions,
   destruction: breachFx,
+  interiors,
+  openings,
   collapses,
   space,
   audio,

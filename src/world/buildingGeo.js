@@ -30,6 +30,8 @@ export class GeoBuilder {
     g.setAttribute('normal', new THREE.Float32BufferAttribute(this.nor, 3));
     g.setAttribute('uv', new THREE.Float32BufferAttribute(this.uv, 2));
     g.setAttribute('color', new THREE.Float32BufferAttribute(this.col, 3));
+    // 1 nos prédios com interior montado: só eles recortam os furos (aberturas.js).
+    g.setAttribute('open', new THREE.Float32BufferAttribute(new Float32Array(this.pos.length / 3), 1));
     g.setIndex(this.idx);
     g.computeBoundingSphere();
     return g;
