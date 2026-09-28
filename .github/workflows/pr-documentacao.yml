@@ -1,0 +1,25 @@
+name: PR documentado
+
+# Todo PR precisa apontar para a nota dele no cofre. A regra vive no CLAUDE.md;
+# este check faz a omissão virar falha em vez de depender de memória.
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+jobs:
+  documentacao:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Conferir seção de documentação
+        env:
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          if ! printf '%s\n' "$BODY" | grep -Eq '^## 📓? ?Documentação'; then
+            echo "::error::Falta a seção '## 📓 Documentação' no corpo do PR."
+            exit 1
+          fi
+          if ! printf '%s\n' "$BODY" | grep -q 'github.com/VictorNascimento14/Obsidian-Superman'; then
+            echo "::error::A seção de documentação precisa linkar ao menos uma nota do cofre Obsidian-Superman."
+            exit 1
+          fi
+          echo "Documentação linkada."
