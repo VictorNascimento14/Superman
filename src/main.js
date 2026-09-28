@@ -22,6 +22,7 @@ import { createOverlay } from './ui/overlay.js';
 import { createHud } from './ui/hud.js';
 import { createHeatVision } from './powers/heatvision.js';
 import { createSolar, solarFlux } from './powers/solar.js';
+import { createPierce } from './powers/pierce.js';
 import { createMissions } from './game/missions.js';
 import { createAudio } from './audio/audio.js';
 
@@ -86,6 +87,10 @@ const shockwaves = createShockwaves(world);
 const breachFx = createBreachFx(world);
 const heatVision = createHeatVision(world, hero, collision, camera);
 const solar = createSolar();
+const pierce = createPierce();
+const aimDir = new THREE.Vector3();
+const headPos = new THREE.Vector3();
+let warnedCity = false;
 const collapses = createCollapses({
   scene: world, city, layout, collision, fx: breachFx,
   clearMarks: (box) => { breachFx.clearMarks(box); heatVision.clearMarks(box); },
@@ -247,7 +252,22 @@ renderer.setAnimationLoop(() => {
 
   // A mira sai da câmera: atualizar depois dela. Botão direito ou F.
   const wantsHeat = !paused && (input.mouseDown(2) || input.isDown('KeyF'));
-  heatVision.update(dt, wantsHeat || debug.heat);
+  // Carregada de Sol, a visão de calor que acerta a Terra atravessa o planeta (de longe, com a
+  // mira assistida) e deixa um buraco na entrada e outro na saída. Metrópolis é protegida. No
+  // mundo plano da cidade, o raio para nos prédios e no chão como sempre.
+  camera.getWorldDirection(aimDir);
+  // Dispara neste quadro? (a mesma regra da reserva: pedido, sem trava e com energia)
+  const firingNow = (wantsHeat || debug.heat) && !heatVision.energy.locked && heatVision.energy.value > 0;
+  const shot = nearCity(camera.position) ? null : pierce.update(dt, camera.position, aimDir, solar.charge, firingNow);
+  heatVision.update(dt, wantsHeat || debug.heat, shot ? shot.dir : null);
+  space.setBeam(shot, headPos.set(flight.pos.x, flight.pos.y + 0.7, flight.pos.z));
+  if (shot && !shot.blocked) space.setHoles(pierce.holes);
+  if (shot?.opened) {
+    hud.toast('A TERRA FOI ATRAVESSADA!', 2.5);
+    audio.impact(1);
+  }
+  if (shot?.blocked && !warnedCity) hud.toast('METRÓPOLIS, NÃO: O RAIO PARA NA SUPERFÍCIE', 2);
+  warnedCity = !!shot?.blocked;
   hud.setEnergy(heatVision.energy.value);
   const groundY = collision.heightAt(flight.pos.x, flight.pos.z);
   hud.update(dt, flight, groundY);
@@ -315,6 +335,7 @@ window.__game = {
   hud,
   heatVision,
   solar,
+  pierce,
   missions,
   destruction: breachFx,
   collapses,

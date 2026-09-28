@@ -125,10 +125,12 @@ export function createHeatVision(scene, hero, collision, camera) {
     halo.color.lerpColors(haloCold, haloHot, k);
   }
 
-  // Devolve o ponto mirado (e preenche `hit`); alvos vencem prédios mais distantes.
-  function trace() {
+  // Devolve o ponto mirado (e preenche `hit`); alvos vencem prédios mais distantes. `over`: a
+  // direção da mira assistida, quando o raio carregado vai à Terra.
+  function trace(over) {
     origin.copy(camera.position);
-    camera.getWorldDirection(dir);
+    if (over) dir.set(over.x, over.y, over.z);
+    else camera.getWorldDirection(dir);
     const range = RANGE * (1 + SOLAR.range * charge);
     let best = range;
     let target = null;
@@ -143,7 +145,7 @@ export function createHeatVision(scene, hero, collision, camera) {
 
   let heat = 0;
   let hitting = false;
-  function update(dt, wants) {
+  function update(dt, wants, over = null) {
     const firing = energy.update(dt, wants, 1 - charge);
     heat += ((firing ? 1 : 0) - heat) * (1 - Math.exp(-dt * 12));
     hero.eyeMat.emissiveIntensity = heat * 12;
@@ -155,7 +157,7 @@ export function createHeatVision(scene, hero, collision, camera) {
       glow.visible = false;
       return;
     }
-    const { target, surface } = trace();
+    const { target, surface } = trace(over);
     hitting = surface || !!target;
     hero.eyes.forEach((e, k) => {
       // Olho e mira no mesmo espaço (o do mundo, que a origem flutuante desloca); o lookAt quer
