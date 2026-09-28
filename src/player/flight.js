@@ -47,6 +47,7 @@ export function createFlight(collision, spawn) {
     bodies: EARTH_ONLY, // corpos celestes (o primeiro é a Terra); o jogo põe o sistema solar
     nearest: { i: 0, d: 0 }, // corpo com a superfície mais perto e a distância até ela
     charge: 0, // carga solar (0–1): mais velocidade e mais força contra prédio
+    inside: false, // atravessando um prédio agora
   };
   // Vetores de trabalho: nada aloca no update (invariante 2).
   const dir = new Vector3();
@@ -254,6 +255,7 @@ export function createFlight(collision, spawn) {
     }
     s.speed = s.vel.length();
     s.altitude = altitude(s.pos);
+    s.inside = smashCount > 0;
     updatePose(dt);
     updateOrientation(dt);
   }
