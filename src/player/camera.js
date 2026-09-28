@@ -13,14 +13,15 @@ export function createChaseCamera(camera, collision) {
   let dist = 6;
   let fov = camera.fov;
   let trauma = 0;
+  let shoulder = 1;
   let t = 0;
 
-  function update(dt, flight) {
+  function update(dt, flight, aiming = false) {
     t += dt;
     const sp = flight.speed;
     const flying = flight.mode === 'air';
     const fast = Math.min(sp, 420) / 420;
-    const wantDist = flying ? 6.5 + fast * 2.5 : 5;
+    const wantDist = (flying ? 6.5 + fast * 2.5 : 5) * (aiming ? 0.7 : 1);
     dist += (wantDist - dist) * (1 - Math.exp(-dt * 3));
     const wantFov = 62 + 14 * THREE.MathUtils.smoothstep(sp, 40, 420);
     fov += (wantFov - fov) * (1 - Math.exp(-dt * 3));
@@ -30,8 +31,14 @@ export function createChaseCamera(camera, collision) {
     }
 
     viewDirection(flight.yaw, flight.pitch, dir);
+    // Sobre o ombro direito: sem isto o herói fica entre a câmera e a mira e esconde
+    // os feixes da visão de calor. Centraliza em alta velocidade.
+    const wantShoulder = (aiming ? 1.7 : 1.1) * (1 - THREE.MathUtils.smoothstep(sp, 20, 80));
+    shoulder += (wantShoulder - shoulder) * (1 - Math.exp(-dt * 5));
     target.copy(flight.pos);
     target.y += flying ? 0.7 : 0.9;
+    target.x -= Math.cos(flight.yaw) * shoulder;
+    target.z += Math.sin(flight.yaw) * shoulder;
     want.copy(target).addScaledVector(dir, -dist);
     // Quanto mais rápido, mais alta a câmera: bem atrás e na mesma altura, o herói
     // deitado aparece de pés para a câmera, fino como um risco.

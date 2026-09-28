@@ -46,6 +46,7 @@ export function createInput(target) {
       handlers.get(code).push(fn);
     },
     mouseDown: (b) => mouse.has(b),
+    isDown: (code) => down.has(code),
     // Estado de movimento do quadro; `jump` é borda (verdadeiro uma vez por toque).
     read(out) {
       out.forward = (any(BIND.forward) ? 1 : 0) - (any(BIND.back) ? 1 : 0);
