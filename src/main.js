@@ -26,6 +26,7 @@ import { createHud } from './ui/hud.js';
 import { createHeatVision } from './powers/heatvision.js';
 import { createSolar, solarFlux, SOLAR } from './powers/solar.js';
 import { createPierce } from './powers/pierce.js';
+import { createCuts, faceOf } from './powers/cuts.js';
 import { createMissions } from './game/missions.js';
 import { createAudio } from './audio/audio.js';
 
@@ -100,6 +101,8 @@ const SMASH_R = 2.2; // m: o que o herói arrebenta em volta do caminho (pega me
 const heatVision = createHeatVision(world, hero, collision, camera);
 const solar = createSolar();
 const pierce = createPierce();
+const cuts = createCuts();
+const cutFace = { face: 0, u: 0, len: 1 };
 const aimDir = new THREE.Vector3();
 const headPos = new THREE.Vector3();
 let warnedCity = false;
@@ -328,6 +331,23 @@ renderer.setAnimationLoop(() => {
   const firingNow = (wantsHeat || debug.heat) && !heatVision.energy.locked && heatVision.energy.value > 0;
   const shot = nearCity(camera.position) ? null : pierce.update(dt, camera.position, aimDir, solar.charge, firingNow);
   heatVision.update(dt, wantsHeat || debug.heat, shot ? shot.dir : null);
+  // A visão de calor corta: o raio numa fachada queima a faixa em que bate; cortada a largura
+  // toda, o prédio cai dali para cima; parado num ponto, estoura um furo — que entra no jogo como
+  // uma ruptura (furo aberto, explosão, interior, andares cedendo) no próximo quadro.
+  const burn = heatVision.surfaceHit;
+  const burnBox = burn ? collision.boxes[burn.box] : null;
+  // Só fachada (normal quase horizontal): varrer um telhado não fatia o prédio.
+  if (burnBox?.breakable && Math.abs(burn.ny) < 0.5 && !collapses.isCollapsed(burnBox.building) && !layout.buildings[burnBox.building].landmark) {
+    faceOf(burnBox, burn.nx, burn.nz, burn, cutFace);
+    const r = cuts.hit(dt, burnBox.building, cutFace.face, cutFace.u, cutFace.len, burn, solar.charge);
+    if (r.slice !== null && collapses.slice(burnBox.building, r.slice, aimDir)) hud.toast('CORTADO!', 1.2);
+    else if (r.blast) {
+      flight.events.push({
+        type: 'breach', entry: true, box: burn.box, speed: 120, force: 120 * (1 + SOLAR.force * solar.charge),
+        at: new THREE.Vector3(r.blast.x, r.blast.y, r.blast.z), normal: new THREE.Vector3(burn.nx, burn.ny, burn.nz), dir: aimDir.clone(),
+      });
+    }
+  } else cuts.release();
   space.setBeam(shot, headPos.set(flight.pos.x, flight.pos.y + 0.7, flight.pos.z));
   if (shot && !shot.blocked) space.setHoles(pierce.holes);
   if (shot?.opened) {
@@ -405,6 +425,7 @@ window.__game = {
   heatVision,
   solar,
   pierce,
+  cuts,
   missions,
   destruction: breachFx,
   interiors,

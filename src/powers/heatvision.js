@@ -52,6 +52,23 @@ export function createHeatVision(scene, hero, collision, camera) {
   let scorchNext = 0;
   let scorchTimer = 0;
 
+  // Corte em brasa: um brilho aditivo sobre cada marca recente, que esfria em ~2,5 s. Com o raio
+  // varrendo a fachada, vira uma linha incandescente.
+  const HOT = 96;
+  const HOT_LIFE = 2.5;
+  const hot = new THREE.InstancedMesh(
+    new THREE.PlaneGeometry(1, 1),
+    new THREE.MeshBasicMaterial({ map: radialTexture('rgba(255,255,255,1)', 'rgba(255,255,255,0)'), blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, fog: false, polygonOffset: true, polygonOffsetFactor: -6 }),
+    HOT,
+  );
+  hot.count = 0;
+  hot.frustumCulled = false;
+  hot.setColorAt(0, new THREE.Color()); // cria o buffer de cor
+  scene.add(hot);
+  const hotAge = new Float32Array(HOT).fill(HOT_LIFE);
+  const hotColor = new THREE.Color();
+  let hotNext = 0;
+
   // Fagulhas: pontos com física simples, aditivos.
   const sparkPos = new Float32Array(MAX_SPARKS * 3);
   const sparkVel = new Float32Array(MAX_SPARKS * 3);
@@ -85,6 +102,21 @@ export function createHeatVision(scene, hero, collision, camera) {
     scorchNext = (scorchNext + 1) % MAX_SCORCH;
     scorch.count = Math.min(MAX_SCORCH, scorch.count + 1);
     scorch.instanceMatrix.needsUpdate = true;
+    eye.addScaledVector(n, 0.02);
+    hot.setMatrixAt(hotNext, m.compose(eye, q, s.multiplyScalar(0.8)));
+    hotAge[hotNext] = 0;
+    hotNext = (hotNext + 1) % HOT;
+    hot.count = Math.min(HOT, hot.count + 1);
+    hot.instanceMatrix.needsUpdate = true;
+  }
+
+  function updateHot(dt) {
+    for (let i = 0; i < hot.count; i++) {
+      hotAge[i] = Math.min(HOT_LIFE, hotAge[i] + dt);
+      const k = (1 - hotAge[i] / HOT_LIFE) ** 2;
+      hot.setColorAt(i, hotColor.setRGB(4, 1.5, 0.3).multiplyScalar(k * (1 + charge)));
+    }
+    if (hot.count) hot.instanceColor.needsUpdate = true;
   }
 
   function emitSparks(p, normal, count) {
@@ -145,12 +177,15 @@ export function createHeatVision(scene, hero, collision, camera) {
 
   let heat = 0;
   let hitting = false;
+  let onSurface = false; // o raio está numa superfície da cidade agora (hit tem o ponto)
   function update(dt, wants, over = null) {
     const firing = energy.update(dt, wants, 1 - charge);
     heat += ((firing ? 1 : 0) - heat) * (1 - Math.exp(-dt * 12));
     hero.eyeMat.emissiveIntensity = heat * 12;
     updateSparks(dt);
+    updateHot(dt);
     hitting = false;
+    onSurface = false;
     if (!firing) {
       beams.forEach((b) => { b.visible = false; });
       light.intensity = 0;
@@ -159,6 +194,7 @@ export function createHeatVision(scene, hero, collision, camera) {
     }
     const { target, surface } = trace(over);
     hitting = surface || !!target;
+    onSurface = surface && hit.box >= 0;
     hero.eyes.forEach((e, k) => {
       // Olho e mira no mesmo espaço (o do mundo, que a origem flutuante desloca); o lookAt quer
       // espaço de render.
@@ -195,6 +231,8 @@ export function createHeatVision(scene, hero, collision, camera) {
     clearMarks: (box) => hideInstancesIn(scorch, box), // prédio desabou: marca não fica no ar
     get firing() { return energy.firing; },
     get hitting() { return hitting; },
+    // Onde o raio está numa caixa da cidade neste quadro (ponto, normal, caixa), ou null.
+    get surfaceHit() { return onSurface ? hit : null; },
   };
 }
 
