@@ -17,6 +17,7 @@ import { createOverlay } from './ui/overlay.js';
 import { createHud } from './ui/hud.js';
 import { createHeatVision } from './powers/heatvision.js';
 import { createMissions } from './game/missions.js';
+import { createAudio } from './audio/audio.js';
 
 const app = document.getElementById('app');
 const qualityName = pickQuality();
@@ -52,9 +53,12 @@ missions.setBaseMarkers([{ x: planet.x, z: planet.z, color: '#e8e8e8' }]);
 input.onKey('KeyH', () => hud.toggleHelp());
 input.onKey('KeyN', () => missions.skip());
 const prevPos = new THREE.Vector3();
+const audio = createAudio();
+input.onKey('KeyM', () => hud.toast(audio.toggleMute() ? 'SOM DESLIGADO' : 'SOM LIGADO', 1));
 
 let paused = true;
 const start = () => {
+  audio.start();
   overlay.hide();
   hud.show();
   paused = false;
@@ -115,10 +119,16 @@ renderer.setAnimationLoop(() => {
       shockwaves.spawn(e.at, flight.vel.clone().normalize());
       chase.shake(0.9);
       hud.toast('BARREIRA DO SOM');
-    } else if (e.type === 'impact') chase.shake(Math.min(1, e.speed / 200));
+      audio.sonicBoom();
+    } else if (e.type === 'impact') {
+      chase.shake(Math.min(1, e.speed / 200));
+      audio.impact(Math.min(1, e.speed / 300));
+    } else if (e.type === 'takeoff') audio.takeoff();
     else if (e.type === 'supersonic') chase.shake(0.3);
   }
   flight.events.length = 0;
+  for (const e of missions.events) audio[e.type]?.();
+  missions.events.length = 0;
 
   hero.root.position.copy(flight.pos);
   hero.root.quaternion.copy(flight.orientation);
@@ -134,7 +144,9 @@ renderer.setAnimationLoop(() => {
   const wantsHeat = !paused && (input.mouseDown(2) || input.isDown('KeyF'));
   heatVision.update(dt, wantsHeat || debug.heat);
   hud.setEnergy(heatVision.energy.value);
-  hud.update(dt, flight, collision.heightAt(flight.pos.x, flight.pos.z));
+  const groundY = collision.heightAt(flight.pos.x, flight.pos.z);
+  hud.update(dt, flight, groundY);
+  audio.update(paused ? 0 : flight.speed, flight.pos.y - groundY, heatVision.firing, heatVision.hitting);
   sky.update(dt, flight.pos, elapsed);
   city.update(dt, elapsed, sky.state.night);
   traffic.update(dt);
@@ -156,6 +168,7 @@ window.__game = {
   hud,
   heatVision,
   missions,
+  audio,
   heat: (on) => { debug.heat = on; },
   autopilot: (m) => { debug.autopilot = m ? { forward: 0, right: 0, up: 0, boost: false, jump: false, ...m } : null; },
   camHero: (x, y, z) => { debug.cam = new THREE.Vector3(x, y, z); },

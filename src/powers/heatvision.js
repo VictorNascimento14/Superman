@@ -124,11 +124,13 @@ export function createHeatVision(scene, hero, collision, camera) {
   }
 
   let heat = 0;
+  let hitting = false;
   function update(dt, wants) {
     const firing = energy.update(dt, wants);
     heat += ((firing ? 1 : 0) - heat) * (1 - Math.exp(-dt * 12));
     hero.eyeMat.emissiveIntensity = heat * 12;
     updateSparks(dt);
+    hitting = false;
     if (!firing) {
       beams.forEach((b) => { b.visible = false; });
       light.intensity = 0;
@@ -136,6 +138,7 @@ export function createHeatVision(scene, hero, collision, camera) {
       return;
     }
     const { target, surface } = trace();
+    hitting = surface || !!target;
     hero.eyes.forEach((e, k) => {
       e.getWorldPosition(eye);
       const b = beams[k];
@@ -165,7 +168,7 @@ export function createHeatVision(scene, hero, collision, camera) {
     }
   }
 
-  return { update, energy, targets, get firing() { return energy.firing; } };
+  return { update, energy, targets, get firing() { return energy.firing; }, get hitting() { return hitting; } };
 }
 
 function radialTexture(inner, outer) {

@@ -21,6 +21,7 @@ export function createMissions({ scene, collision, layout, heatVision, hud }) {
   let idx = -1;
   let m = null; // missão atual
   let pause = 2; // respiro antes da primeira
+  const events = []; // { type: 'ring' | 'success' | 'fail' | 'explosion' | 'alert' } — consumidos pelo áudio
   const tmp = new THREE.Vector3();
 
   // --- Pilar de luz que marca o lugar da missão de longe.
@@ -44,6 +45,7 @@ export function createMissions({ scene, collision, layout, heatVision, hud }) {
     e.b.position.copy(p);
     e.t = 0;
     e.b.visible = true;
+    events.push({ type: 'explosion' });
   };
 
   // --- Construtores de cada tipo.
@@ -113,6 +115,7 @@ export function createMissions({ scene, collision, layout, heatVision, hud }) {
     m = type === 'aneis' ? startRings(flight) : type === 'resgate' ? startRescue(flight) : startDrones(flight);
     beacon.material.color.set(COLORS[type]);
     hud.toast({ aneis: 'TREINO DE VOO', resgate: 'ALGUÉM PRECISA DE AJUDA', drones: 'DRONES HOSTIS' }[type], 2.5);
+    events.push({ type: 'alert' });
   }
 
   function end(ok, points) {
@@ -120,7 +123,11 @@ export function createMissions({ scene, collision, layout, heatVision, hud }) {
       score += points;
       done++;
       hud.toast(`MISSÃO CUMPRIDA  +${points}`, 2.5);
-    } else hud.toast('MISSÃO FALHOU', 2.5);
+      events.push({ type: 'success' });
+    } else {
+      hud.toast('MISSÃO FALHOU', 2.5);
+      events.push({ type: 'fail' });
+    }
     for (const o of m.objects) root.remove(o);
     if (m.type === 'drones') for (const d of m.drones) heatVision.targets.delete(d);
     m = null;
@@ -166,6 +173,7 @@ export function createMissions({ scene, collision, layout, heatVision, hud }) {
     if (ringCrossed(prevPos, flight.pos, r)) {
       m.next++;
       m.time += 6;
+      events.push({ type: 'ring' });
       score += 25;
       if (m.next >= m.course.length) return end(true, 100 + Math.round(m.time) * 2);
       hud.toast(`${m.next}/${m.course.length}`, 0.8);
@@ -187,9 +195,10 @@ export function createMissions({ scene, collision, layout, heatVision, hud }) {
       if (f.wait <= 0 || dist(flight.pos, f) < 300) {
         f.state = 'falling';
         hud.toast('ELE CAIU!', 1.5);
+        events.push({ type: 'alert' });
       }
     }
-    if (f.state === 'waiting' || f.state === 'falling') tryCatch(f, flight.pos);
+    if ((f.state === 'waiting' || f.state === 'falling') && tryCatch(f, flight.pos)) events.push({ type: 'ring' });
     stepFaller(f, dt);
     if (f.state === 'falling') {
       m.fig.rotation.z += dt * 3; // rodopiando
@@ -231,6 +240,7 @@ export function createMissions({ scene, collision, layout, heatVision, hud }) {
 
   return {
     update,
+    events,
     skip: () => { if (m) end(false); },
     setBaseMarkers: (list) => { baseMarkers = list; },
     get score() { return score; },
