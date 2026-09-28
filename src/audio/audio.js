@@ -149,6 +149,8 @@ export function createAudio() {
     sonicBoom: () => burst({ lp: 1400, sweepTo: 60, peak: 0.9, decay: 1.4, thump: 70 }),
     impact: (k) => burst({ lp: 600, sweepTo: 60, peak: 0.3 + 0.5 * k, decay: 0.5, thump: 55 }),
     explosion: () => burst({ lp: 1200, sweepTo: 100, peak: 0.7, decay: 0.9, thump: 60 }),
+    // Parede cedendo: estalo seco na entrada, estrondo mais longo e grave na saída (entulho).
+    breach: (k, entry) => burst({ lp: entry ? 2600 : 1800, sweepTo: 120, peak: 0.35 + 0.5 * k, decay: entry ? 0.6 : 1.1, thump: entry ? 60 : 45 }),
     takeoff: () => burst({ lp: 2400, sweepTo: 300, peak: 0.2, decay: 0.5 }),
     ring: () => tones([880, 1320], { step: 0.06, length: 0.4 }),
     success: () => tones([523, 659, 784, 1047], { type: 'triangle', step: 0.11, length: 0.5, peak: 0.2 }),

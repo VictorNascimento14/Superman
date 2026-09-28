@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createFlight, FLIGHT } from '../src/player/flight.js';
+import { createFlight, FLIGHT, SMASH } from '../src/player/flight.js';
 import { createCollisionWorld } from '../src/world/collision.js';
 
 // Um prédio de 10 × 50 × 10 em x ∈ [0, 10], z ∈ [100, 110].
@@ -73,6 +73,59 @@ test('bater num prédio voando rente ao chão não lança o herói para cima', (
   run(f, { ...idle, forward: 1 }, 1.5);
   assert.ok(f.pos.z < 100 - FLIGHT.radius + 0.01, `atravessou: z = ${f.pos.z}`);
   assert.ok(f.pos.y < 3, `lançado para cima: y = ${f.pos.y.toFixed(1)}, vy = ${f.vel.y.toFixed(1)}`);
+});
+
+// O mesmo prédio, quebrável (como os da cidade), e um bem fundo para frear lá dentro.
+const breakable = createCollisionWorld([{ minX: 0, minY: 0, minZ: 100, maxX: 10, maxY: 50, maxZ: 110, breakable: true }]);
+const deep = createCollisionWorld([{ minX: 0, minY: 0, minZ: 100, maxX: 10, maxY: 50, maxZ: 300, breakable: true }]);
+function flyingIn(w) {
+  const f = createFlight(w, { x: 5, y: 100, z: 0, yaw: 0 });
+  f.update(1 / 60, { ...idle, jump: true });
+  return f;
+}
+const breaches = (f) => f.events.filter((e) => e.type === 'breach');
+
+test('rápido contra um prédio: fura, atravessa e sai do outro lado mais devagar', () => {
+  const f = flyingIn(breakable);
+  f.pos.set(5, 20, 90);
+  f.vel.set(0, 0, 150);
+  run(f, { ...idle, forward: 1, boost: true }, 0.4);
+  assert.ok(f.pos.z > 110 + FLIGHT.radius, `não saiu: z = ${f.pos.z}`);
+  const [inn, out] = breaches(f);
+  assert.equal(breaches(f).length, 2);
+  assert.ok(inn.entry && Math.abs(inn.at.z - 100) < 0.5 && inn.normal.z < -0.99, 'furo de entrada fora da face da frente');
+  assert.ok(!out.entry && Math.abs(out.at.z - 110) < 0.5 && out.normal.z > 0.99, 'furo de saída fora da face de trás');
+  assert.ok(out.speed < inn.speed, `saiu a ${out.speed} m/s, entrou a ${inn.speed}`);
+});
+
+test('devagar contra o prédio: ele continua sólido', () => {
+  const f = flyingIn(breakable);
+  f.pos.set(5, 20, 95);
+  f.vel.set(0, 0, SMASH.speed - 10);
+  run(f, { ...idle, forward: 1 }, 1);
+  assert.ok(f.pos.z < 100 - FLIGHT.radius + 0.01, `atravessou: z = ${f.pos.z}`);
+  assert.equal(breaches(f).length, 0);
+});
+
+test('raspar a parede de lado em alta velocidade não fura', () => {
+  // Fachada comprida: vindo de lado, o herói só roça a face z = 100 (de frente numa quina, fura).
+  const f = flyingIn(createCollisionWorld([{ minX: -200, minY: 0, minZ: 100, maxX: 200, maxY: 50, maxZ: 110, breakable: true }]));
+  f.pos.set(-100, 20, 99);
+  f.vel.set(150, 0, 5); // quase paralelo à face
+  run(f, idle, 0.5);
+  assert.equal(breaches(f).length, 0);
+  assert.ok(f.pos.z < 100 - FLIGHT.radius + 0.01);
+});
+
+test('lá dentro, devagar, não pousa no telhado nem fica preso', () => {
+  // heightAt dentro do prédio é o telhado: pousar ali teleportava o herói 30 m para cima.
+  const f = flyingIn(deep);
+  f.pos.set(5, 20, 99); // encosta já no primeiro quadro: sem comando, o herói freia sozinho
+  f.vel.set(0, 0, SMASH.speed + 10);
+  run(f, idle, 1.5);
+  assert.equal(f.mode, 'air');
+  assert.ok(f.pos.y < 30, `teleportou: y = ${f.pos.y}`);
+  assert.ok(f.speed >= SMASH.min - 1e-6, `parou lá dentro: ${f.speed} m/s`);
 });
 
 test('descer devagar até o telhado pousa em cima dele', () => {

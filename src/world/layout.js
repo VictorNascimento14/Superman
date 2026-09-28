@@ -150,7 +150,7 @@ export function collisionBoxes(layout) {
   const boxes = [];
   for (const b of layout.buildings) {
     for (const t of b.tiers) {
-      boxes.push({ minX: t.x - t.w / 2, minY: t.y0, minZ: t.z - t.d / 2, maxX: t.x + t.w / 2, maxY: t.y1, maxZ: t.z + t.d / 2 });
+      boxes.push({ minX: t.x - t.w / 2, minY: t.y0, minZ: t.z - t.d / 2, maxX: t.x + t.w / 2, maxY: t.y1, maxZ: t.z + t.d / 2, breakable: true });
     }
     if (b.globe) {
       // Caixa a 75% do raio: com o raio inteiro o herói ficava em pé no ar nas quinas.

@@ -5,6 +5,7 @@ import { HALF } from '../world/layout.js';
 const CSS = `
 #hud { position: fixed; inset: 0; pointer-events: none; color: #eef2fb; font: 600 14px/1.2 system-ui, sans-serif; text-shadow: 0 1px 3px rgba(0,0,0,.7); z-index: 5; }
 #hud.hidden { display: none; }
+#hud .dust { position: absolute; inset: 0; opacity: 0; background: radial-gradient(ellipse at center, rgba(96,84,70,.55) 0%, rgba(52,44,36,.92) 70%, rgba(28,24,20,.97) 100%); }
 #hud .speed { position: absolute; left: 24px; bottom: 22px; }
 #hud .speed b { display: block; font: 800 44px/1 system-ui; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
 #hud .speed small { color: #b9c4dc; font-weight: 600; }
@@ -39,6 +40,7 @@ export function createHud(layout) {
   el.id = 'hud';
   el.className = 'hidden';
   el.innerHTML = `
+    <div class="dust"></div>
     <div class="hint">H — controles</div>
     <div class="objective"></div>
     <div class="toast"></div>
@@ -54,7 +56,7 @@ export function createHud(layout) {
   const $ = (s) => el.querySelector(s);
   const ui = {
     speed: $('.speed b'), bar: $('.bar i'), alt: $('.alt'), mode: $('.mode'),
-    objective: $('.objective'), toast: $('.toast'), energy: $('.energy i'), help: $('.help'), map: $('.map'),
+    objective: $('.objective'), toast: $('.toast'), energy: $('.energy i'), help: $('.help'), map: $('.map'), dust: $('.dust'),
   };
   const ctx = ui.map.getContext('2d');
   const base = drawBaseMap(layout);
@@ -129,6 +131,8 @@ export function createHud(layout) {
     setObjective: (text) => set('obj', ui.objective, text ?? ''),
     setMarkers: (list) => { markers = list; },
     setEnergy: (k) => set('energy', ui.energy.style, `${Math.round(k * 100)}%`, 'width'),
+    // Poeira na tela (0–1) enquanto a câmera atravessa um prédio com o herói.
+    setDust: (k) => set('dust', ui.dust.style, k < 0.01 ? '0' : k.toFixed(2), 'opacity'),
     toast(text, seconds = 2) {
       ui.toast.textContent = text;
       ui.toast.classList.add('on');
