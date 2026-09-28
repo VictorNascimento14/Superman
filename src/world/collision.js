@@ -24,7 +24,8 @@ export function createCollisionWorld(boxes, { cellSize = 64, floor = 0 } = {}) {
       for (let iz = cellOf(minZ); iz <= cellOf(maxZ); iz++) {
         const list = cells.get(key(ix, iz));
         if (!list) continue;
-        for (const idx of list) {
+        for (let j = 0; j < list.length; j++) {
+          const idx = list[j];
           if (stamp[idx] === visit) continue;
           stamp[idx] = visit;
           fn(boxes[idx], idx);
@@ -33,44 +34,58 @@ export function createCollisionWorld(boxes, { cellSize = 64, floor = 0 } = {}) {
     }
   }
 
+  // Consulta de esfera em curso. O visitante do forEachNear é criado uma vez só: uma closure
+  // nova por chamada alocava a cada subpasso do voo.
+  let qp = null;
+  let qr = 0;
+  let qn = null;
+  let qc = null;
+  let qhit = false;
+  function pushOut(b) {
+    const p = qp;
+    const r = qr;
+    const outNormal = qn;
+    const onContact = qc;
+    const cx = Math.max(b.minX, Math.min(p.x, b.maxX));
+    const cy = Math.max(b.minY, Math.min(p.y, b.maxY));
+    const cz = Math.max(b.minZ, Math.min(p.z, b.maxZ));
+    let dx = p.x - cx;
+    let dy = p.y - cy;
+    let dz = p.z - cz;
+    const d2 = dx * dx + dy * dy + dz * dz;
+    if (d2 >= r * r) return;
+    qhit = true;
+    if (d2 > 1e-9) {
+      const d = Math.sqrt(d2);
+      const push = (r - d) / d;
+      p.x += dx * push; p.y += dy * push; p.z += dz * push;
+      outNormal.x += dx / d; outNormal.y += dy / d; outNormal.z += dz / d;
+      onContact?.(dx / d, dy / d, dz / d);
+      return;
+    }
+    // Centro dentro da caixa (túnel por velocidade alta): sai pela face mais próxima.
+    const exits = [
+      [b.maxX - p.x + r, 1, 0, 0], [p.x - b.minX + r, -1, 0, 0],
+      [b.maxY - p.y + r, 0, 1, 0], [p.y - b.minY + r, 0, -1, 0],
+      [b.maxZ - p.z + r, 0, 0, 1], [p.z - b.minZ + r, 0, 0, -1],
+    ];
+    let best = exits[0];
+    for (const e of exits) if (e[0] < best[0]) best = e;
+    [, dx, dy, dz] = best;
+    p.x += dx * best[0]; p.y += dy * best[0]; p.z += dz * best[0];
+    outNormal.x += dx; outNormal.y += dy; outNormal.z += dz;
+    onContact?.(dx, dy, dz);
+  }
+
   // Empurra a esfera para fora dos prédios e do chão. Devolve true se tocou algo;
   // `outNormal` recebe a soma das normais de contato (não normalizada). `onContact`, se
   // vier, recebe cada normal unitária em separado: quem corta velocidade precisa delas uma
   // a uma — chão + parede somados viram uma diagonal que joga o corpo para cima.
   function resolveSphere(p, r, outNormal, onContact) {
-    let hit = false;
+    qp = p; qr = r; qn = outNormal; qc = onContact; qhit = false;
     outNormal.x = outNormal.y = outNormal.z = 0;
-    forEachNear(p.x - r, p.z - r, p.x + r, p.z + r, (b) => {
-      const cx = Math.max(b.minX, Math.min(p.x, b.maxX));
-      const cy = Math.max(b.minY, Math.min(p.y, b.maxY));
-      const cz = Math.max(b.minZ, Math.min(p.z, b.maxZ));
-      let dx = p.x - cx;
-      let dy = p.y - cy;
-      let dz = p.z - cz;
-      const d2 = dx * dx + dy * dy + dz * dz;
-      if (d2 >= r * r) return;
-      hit = true;
-      if (d2 > 1e-9) {
-        const d = Math.sqrt(d2);
-        const push = (r - d) / d;
-        p.x += dx * push; p.y += dy * push; p.z += dz * push;
-        outNormal.x += dx / d; outNormal.y += dy / d; outNormal.z += dz / d;
-        onContact?.(dx / d, dy / d, dz / d);
-        return;
-      }
-      // Centro dentro da caixa (túnel por velocidade alta): sai pela face mais próxima.
-      const exits = [
-        [b.maxX - p.x + r, 1, 0, 0], [p.x - b.minX + r, -1, 0, 0],
-        [b.maxY - p.y + r, 0, 1, 0], [p.y - b.minY + r, 0, -1, 0],
-        [b.maxZ - p.z + r, 0, 0, 1], [p.z - b.minZ + r, 0, 0, -1],
-      ];
-      let best = exits[0];
-      for (const e of exits) if (e[0] < best[0]) best = e;
-      [, dx, dy, dz] = best;
-      p.x += dx * best[0]; p.y += dy * best[0]; p.z += dz * best[0];
-      outNormal.x += dx; outNormal.y += dy; outNormal.z += dz;
-      onContact?.(dx, dy, dz);
-    });
+    forEachNear(p.x - r, p.z - r, p.x + r, p.z + r, pushOut);
+    let hit = qhit;
     if (p.y < floor + r) {
       p.y = floor + r;
       outNormal.y += 1;
@@ -101,7 +116,8 @@ export function createCollisionWorld(boxes, { cellSize = 64, floor = 0 } = {}) {
         for (let oz = -1; oz <= 1; oz++) {
           const list = cells.get(key(cellOf(px) + ox, cellOf(pz) + oz));
           if (!list) continue;
-          for (const idx of list) {
+          for (let j = 0; j < list.length; j++) {
+            const idx = list[j];
             if (stamp[idx] === visit) continue;
             stamp[idx] = visit;
             slab(boxes[idx], idx, o, dir, out);
@@ -114,12 +130,16 @@ export function createCollisionWorld(boxes, { cellSize = 64, floor = 0 } = {}) {
   }
 
   // Altura do topo mais alto sob (x, z): telhado onde o herói pode pousar, ou o piso.
+  let hx = 0;
+  let hz = 0;
+  let hh = 0;
+  const topAt = (b) => {
+    if (hx >= b.minX && hx <= b.maxX && hz >= b.minZ && hz <= b.maxZ && b.maxY > hh) hh = b.maxY;
+  };
   function heightAt(x, z) {
-    let h = floor;
-    forEachNear(x, z, x, z, (b) => {
-      if (x >= b.minX && x <= b.maxX && z >= b.minZ && z <= b.maxZ && b.maxY > h) h = b.maxY;
-    });
-    return h;
+    hx = x; hz = z; hh = floor;
+    forEachNear(x, z, x, z, topAt);
+    return hh;
   }
 
   return { resolveSphere, raycast, heightAt, forEachNear, boxes };
@@ -133,14 +153,20 @@ function setHit(out, o, dir, t, nx, ny, nz, box) {
   out.box = box;
 }
 
+// Eixos do teste de slab: um array novo por caixa por raio alocava a cada quadro (a câmera
+// testa ~16 caixas; a visão de calor, até ~90).
+const AXES = [['x', 'minX', 'maxX'], ['y', 'minY', 'maxY'], ['z', 'minZ', 'maxZ']];
+
 function slab(b, idx, o, dir, out) {
   let tmin = 0;
   let tmax = out.dist;
   let nAxis = -1;
   let nSign = 0;
-  const axes = [['x', 'minX', 'maxX'], ['y', 'minY', 'maxY'], ['z', 'minZ', 'maxZ']];
   for (let a = 0; a < 3; a++) {
-    const [c, lo, hi] = axes[a];
+    const ax = AXES[a];
+    const c = ax[0];
+    const lo = ax[1];
+    const hi = ax[2];
     const d = dir[c];
     if (Math.abs(d) < 1e-12) {
       if (o[c] < b[lo] || o[c] > b[hi]) return;
@@ -149,7 +175,7 @@ function slab(b, idx, o, dir, out) {
     let t1 = (b[lo] - o[c]) / d;
     let t2 = (b[hi] - o[c]) / d;
     let sign = -1;
-    if (t1 > t2) { [t1, t2] = [t2, t1]; sign = 1; }
+    if (t1 > t2) { const t = t1; t1 = t2; t2 = t; sign = 1; }
     if (t1 > tmin) { tmin = t1; nAxis = a; nSign = sign; }
     if (t2 < tmax) tmax = t2;
     if (tmin > tmax) return;
