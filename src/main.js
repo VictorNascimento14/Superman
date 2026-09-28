@@ -6,6 +6,8 @@ import { QUALITY, pickQuality } from './render/quality.js';
 import { generateLayout, collisionBoxes } from './world/layout.js';
 import { createCollisionWorld } from './world/collision.js';
 import { createCity } from './world/city.js';
+import { createTraffic } from './world/traffic.js';
+import { createTrafficView } from './world/trafficView.js';
 import { createHero } from './player/hero.js';
 import { createFlight, FLIGHT } from './player/flight.js';
 import { createChaseCamera } from './player/camera.js';
@@ -28,6 +30,8 @@ post.setExposure(sky.state.exposure);
 const layout = generateLayout();
 const collision = createCollisionWorld(collisionBoxes(layout));
 const city = createCity(scene, layout, renderer);
+const traffic = createTraffic();
+const trafficView = createTrafficView(scene, traffic);
 const hero = createHero(scene);
 const shockwaves = createShockwaves(scene);
 const heatVision = createHeatVision(scene, hero, collision, camera);
@@ -127,6 +131,8 @@ renderer.setAnimationLoop(() => {
   hud.update(dt, flight, collision.heightAt(flight.pos.x, flight.pos.z));
   sky.update(dt, flight.pos, elapsed);
   city.update(dt, elapsed, sky.state.night);
+  traffic.update(dt);
+  trafficView.update(sky.state.night, elapsed);
   post.render(dt);
 });
 
@@ -137,6 +143,7 @@ window.__game = {
   flight,
   layout,
   collision,
+  traffic,
   setTime,
   // Dirige o herói sem teclado: autopilot({ forward: 1, boost: true }) — null devolve o controle.
   start,
