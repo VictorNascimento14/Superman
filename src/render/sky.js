@@ -11,6 +11,9 @@ export const TIME_PRESETS = {
 export const TIME_ORDER = ['amanhecer', 'dia', 'entardecer', 'noite'];
 
 const SHADOW_BOX = 260; // meia-aresta da caixa de sombra que acompanha o herói
+// Com o sol a 18°, a caixa cobre ~840 m de chão na direção dele: a luz a 800 m deixava esse
+// trecho antes do `near`, e as sombras de lá sumiam e piscavam. A 2000 m, com far 3000, cabe.
+const LIGHT_DIST = 2000;
 
 export function createSky(scene, renderer, preset) {
   const sky = new Sky();
@@ -48,8 +51,8 @@ export function createSky(scene, renderer, preset) {
   sun.shadow.mapSize.setScalar(preset.shadowMapSize);
   const sc = sun.shadow.camera;
   sc.left = -SHADOW_BOX; sc.right = SHADOW_BOX; sc.top = SHADOW_BOX; sc.bottom = -SHADOW_BOX;
-  sc.near = 10; sc.far = 1600;
-  sun.shadow.bias = -0.0004;
+  sc.near = 10; sc.far = 3000;
+  sun.shadow.bias = -0.0002; // em profundidade normalizada: ~0,6 m no mundo com este far
   sun.shadow.normalBias = 0.6;
   scene.add(sun, sun.target);
 
@@ -59,6 +62,11 @@ export function createSky(scene, renderer, preset) {
   scene.add(stars);
 
   const sunDir = new THREE.Vector3();
+  // Eixos da câmera de sombra (olha ao longo de −sunDir, com o up padrão): a grade de texel
+  // do shadow map segue estes eixos, não x/z do mundo.
+  const lightRight = new THREE.Vector3();
+  const lightUp = new THREE.Vector3();
+  const snap = new THREE.Vector3();
   const state = { name: 'dia', night: 0, exposure: 0.55, sunDir };
 
   function setTime(name) {
@@ -76,6 +84,8 @@ export function createSky(scene, renderer, preset) {
     u.showSunDisc.value = p.elevation > 0 ? 1 : 0;
     u.cloudCoverage.value = p.night > 0.9 ? 0.15 : 0.35;
     sunDir.setFromSphericalCoords(1, THREE.MathUtils.degToRad(90 - lightElev), theta);
+    lightRight.crossVectors(sun.shadow.camera.up, sunDir).normalize();
+    lightUp.crossVectors(sunDir, lightRight);
     sun.color.set(p.sun);
     sun.intensity = p.sunI;
     hemi.intensity = p.hemiI;
@@ -98,12 +108,15 @@ export function createSky(scene, renderer, preset) {
     sky.position.copy(focus);
     nightDome.position.copy(focus);
     stars.position.copy(focus);
-    // A caixa de sombra segue o foco, alinhada à grade de texel para a sombra não tremer.
+    // A caixa de sombra segue o foco, presa à grade de texel nos eixos da câmera de sombra
+    // para a borda da sombra não tremer (arredondar x/z do mundo ainda deslocava o mapa por
+    // frações de texel). Ao longo do sol o centro é livre: não muda a projeção.
     const texel = (SHADOW_BOX * 2) / preset.shadowMapSize;
-    const fx = Math.round(focus.x / texel) * texel;
-    const fz = Math.round(focus.z / texel) * texel;
-    sun.target.position.set(fx, 0, fz);
-    sun.position.set(fx + sunDir.x * 800, sunDir.y * 800, fz + sunDir.z * 800);
+    snap.set(focus.x, 0, focus.z);
+    const a = Math.round(snap.dot(lightRight) / texel) * texel;
+    const b = Math.round(snap.dot(lightUp) / texel) * texel;
+    sun.target.position.copy(lightRight).multiplyScalar(a).addScaledVector(lightUp, b).addScaledVector(sunDir, snap.dot(sunDir));
+    sun.position.copy(sun.target.position).addScaledVector(sunDir, LIGHT_DIST);
   }
 
   setTime('dia');
