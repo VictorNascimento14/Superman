@@ -3,7 +3,7 @@ import { createRenderer } from './render/renderer.js';
 import { createSky, TIME_ORDER } from './render/sky.js';
 import { createPost } from './render/post.js';
 import { QUALITY, pickQuality } from './render/quality.js';
-import { generateLayout, collisionBoxes } from './world/layout.js';
+import { generateLayout, collisionBoxes, WATER_Y } from './world/layout.js';
 import { createCollisionWorld } from './world/collision.js';
 import { createCity } from './world/city.js';
 import { createTraffic } from './world/traffic.js';
@@ -30,7 +30,7 @@ const post = createPost(renderer, scene, camera, preset);
 post.setExposure(sky.state.exposure);
 
 const layout = generateLayout();
-const collision = createCollisionWorld(collisionBoxes(layout));
+const collision = createCollisionWorld(collisionBoxes(layout), { floor: WATER_Y });
 const city = createCity(scene, layout, renderer);
 const traffic = createTraffic();
 const trafficView = createTrafficView(scene, traffic);

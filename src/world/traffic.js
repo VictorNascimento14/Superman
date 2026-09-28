@@ -5,6 +5,9 @@ import { CITY, CELL, HALF, streetLine, streetOpen, blockBounds, isPark } from '.
 // duas faixas por sentido; nos cruzamentos escolhem seguir/virar entre as saídas
 // abertas e fazem a curva por uma Bézier quadrática. Cada faixa tem velocidade fixa,
 // então ninguém ultrapassa ninguém na reta.
+// ponytail: ninguém cede a vez no cruzamento — dois carros podem sair da curva na mesma
+// faixa, um dentro do outro (~30 pares em 60 s, de 900 carros). Upgrade: reservar a faixa
+// de saída antes de entrar na curva.
 export const LANES = [2.8, 8.2]; // distância do eixo da rua (m)
 const LANE_SPEED = [11, 15];
 const EDGE = CITY.street / 2; // o carro decide a curva ao cruzar a faixa de pedestre
@@ -51,7 +54,10 @@ export function createTraffic({ cars = 900, peds = 1400, seed = 77 } = {}) {
     const dir = rng.chance(0.5) ? 1 : -1;
     const lane = rng.int(0, 1);
     const s = streetLine(seg) + EDGE + rng.range(2, CELL - 2 * EDGE - 2);
-    const c = { axis, line, dir, lane, s, speed: LANE_SPEED[lane] * rng.range(0.92, 1.05), turn: null, x: 0, z: 0, yaw: 0 };
+    // Nada de nascer em cima de outro carro da mesma faixa: com a velocidade fixa por
+    // faixa, os dois andariam grudados para sempre.
+    if (list.some((o) => o.axis === axis && o.line === line && o.dir === dir && o.lane === lane && Math.abs(o.s - s) < 6)) continue;
+    const c = { axis, line, dir, lane, s, speed: LANE_SPEED[lane], turn: null, x: 0, z: 0, yaw: 0 };
     place(axis, line, dir, lane, s, c);
     list.push(c);
   }

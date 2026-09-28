@@ -32,10 +32,12 @@ function lightsGeometry() {
   return mergeGeometries(parts);
 }
 
+// Origem nos pés. A altura da CapsuleGeometry é só o trecho reto: 0,9 + 2 × 0,22 = 1,34 m,
+// então o centro vai a 0,67 (com 0,78 a base ficava 11 cm acima do chão).
 function pedGeometry() {
   return mergeGeometries([
-    tinted(new THREE.CapsuleGeometry(0.22, 0.9, 1, 6).translate(0, 0.78, 0), 0xffffff),
-    tinted(new THREE.SphereGeometry(0.14, 6, 4).translate(0, 1.58, 0), 0xd9a47f),
+    tinted(new THREE.CapsuleGeometry(0.22, 0.9, 1, 6).translate(0, 0.67, 0), 0xffffff),
+    tinted(new THREE.SphereGeometry(0.14, 6, 4).translate(0, 1.47, 0), 0xd9a47f),
   ]);
 }
 
@@ -96,7 +98,7 @@ export function createTrafficView(scene, traffic) {
         if ((pd.x - eye.x) ** 2 + (pd.z - eye.z) ** 2 > PED_R2) return;
         q.setFromAxisAngle(up, pd.yaw);
         // Balanço do passo: sobe e desce de leve.
-        m.compose(p.set(pd.x, 0.15 + Math.abs(Math.sin(t * 7 + pd.phase)) * 0.05, pd.z), q, s);
+        m.compose(p.set(pd.x, Math.abs(Math.sin(t * 7 + pd.phase)) * 0.05, pd.z), q, s);
         peds.setMatrixAt(n, m);
         peds.setColorAt(n, col.fromArray(pedColor, i * 3));
         n++;

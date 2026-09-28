@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { generateLayout, collisionBoxes, blockBounds, isPark, parkBounds, streetOpen, CITY, HALF, LANDMARK, PARK } from '../src/world/layout.js';
+import { generateLayout, collisionBoxes, blockBounds, isPark, parkBounds, streetOpen, streetLine, CITY, HALF, LANDMARK, PARK, QUAY, WATER_Y, LAWN } from '../src/world/layout.js';
+import { createCollisionWorld } from '../src/world/collision.js';
 
 const layout = generateLayout();
 
@@ -56,7 +57,20 @@ test('ruas internas do parque ficam fechadas, as de fora abertas', () => {
   assert.ok(isPark(PARK.i0, PARK.j0) && !isPark(0, 0));
 });
 
-test('caixas de colisão: uma por nível, mais o globo', () => {
+test('caixas de colisão: uma por nível, mais o globo, a laje da ilha e o gramado', () => {
   const n = layout.buildings.reduce((s, b) => s + b.tiers.length + (b.globe ? 1 : 0), 0);
-  assert.equal(collisionBoxes(layout).length, n);
+  assert.equal(collisionBoxes(layout).length, n + 2);
+});
+
+test('chão da colisão igual ao da cena: rua 0, gramado LAWN, mar WATER_Y', () => {
+  // Com o piso fixo em y = 0, o herói pousava com as pernas enterradas no parque e em pé
+  // 1,2 m acima da água.
+  const world = createCollisionWorld(collisionBoxes(layout), { floor: WATER_Y });
+  const p = layout.park;
+  assert.equal(world.heightAt((p.x0 + p.x1) / 2, (p.z0 + p.z1) / 2), LAWN);
+  assert.equal(world.heightAt(streetLine(0), streetLine(0)), 0); // cruzamento da borda
+  assert.equal(world.heightAt(HALF + QUAY + 50, 0), WATER_Y);
+  const hit = {};
+  assert.ok(world.raycast({ x: HALF + QUAY + 50, y: 30, z: 0 }, { x: 0, y: -1, z: 0 }, 100, hit));
+  assert.ok(Math.abs(hit.dist - (30 - WATER_Y)) < 1e-9, `raio no mar parou em ${hit.dist}`);
 });

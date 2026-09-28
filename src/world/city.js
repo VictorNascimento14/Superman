@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { createRng } from '../core/rng.js';
-import { CITY, CELL, HALF, STYLES, streetLine } from './layout.js';
+import { CITY, CELL, HALF, STYLES, QUAY, WATER_Y, LAWN, streetLine } from './layout.js';
 import { createTextures, FACADE_TILE, TILE_N } from './textures.js';
 
 // Constrói os meshes da cidade a partir do layout. Invariante 1: geometria repetida é
@@ -130,8 +130,7 @@ export function createCity(scene, layout, renderer) {
   group.add(shadowed(new THREE.Mesh(trims.build(), new THREE.MeshStandardMaterial({ color: 0xb9ad96, roughness: 0.8 }))));
 
   // --- Chão: uma laje grossa (a borda vira o cais) com a textura de ruas repetida por célula.
-  const margin = 30;
-  const size = HALF * 2 + margin * 2;
+  const size = HALF * 2 + QUAY * 2;
   const groundGeo = new THREE.BoxGeometry(size, 4, size);
   groundGeo.translate(0, -2, 0);
   const uv = groundGeo.attributes.uv;
@@ -147,12 +146,12 @@ export function createCity(scene, layout, renderer) {
   // --- Parque: gramado sobre as ruas internas + árvores instanciadas.
   const p = layout.park;
   tex.grass.repeat.set((p.x1 - p.x0) / 12, (p.z1 - p.z0) / 12);
-  const lawn = shadowed(new THREE.Mesh(new THREE.BoxGeometry(p.x1 - p.x0, 0.6, p.z1 - p.z0), new THREE.MeshStandardMaterial({ map: tex.grass, roughness: 1 })), false);
-  lawn.position.set((p.x0 + p.x1) / 2, 0.3, (p.z0 + p.z1) / 2);
+  const lawn = shadowed(new THREE.Mesh(new THREE.BoxGeometry(p.x1 - p.x0, LAWN, p.z1 - p.z0), new THREE.MeshStandardMaterial({ map: tex.grass, roughness: 1 })), false);
+  lawn.position.set((p.x0 + p.x1) / 2, LAWN / 2, (p.z0 + p.z1) / 2);
   group.add(lawn);
   const pond = new THREE.Mesh(new THREE.CircleGeometry(38, 40), null);
   pond.rotation.x = -Math.PI / 2;
-  pond.position.set(lawn.position.x + 40, 0.65, lawn.position.z - 30);
+  pond.position.set(lawn.position.x + 40, LAWN + 0.05, lawn.position.z - 30);
   group.add(pond);
   group.add(makeTrees(p, rng, pond.position));
 
@@ -161,7 +160,7 @@ export function createCity(scene, layout, renderer) {
   const waterMat = new THREE.MeshStandardMaterial({ color: 0x0d2c44, roughness: 0.06, metalness: 0.2, normalMap: tex.waterNormals, normalScale: new THREE.Vector2(0.3, 0.3) });
   const water = new THREE.Mesh(new THREE.PlaneGeometry(14000, 14000), waterMat);
   water.rotation.x = -Math.PI / 2;
-  water.position.y = -1.2;
+  water.position.y = WATER_Y;
   water.receiveShadow = true;
   group.add(water);
   pond.material = waterMat;
@@ -213,7 +212,7 @@ function makeTrees(p, rng, avoid) {
   for (let x = p.x0 + 8; x < p.x1 - 6; x += 11) {
     for (let z = p.z0 + 8; z < p.z1 - 6; z += 11) {
       if (n >= mesh.count || rng.chance(0.3)) continue;
-      v.set(x + rng.range(-4, 4), 0.6, z + rng.range(-4, 4));
+      v.set(x + rng.range(-4, 4), LAWN, z + rng.range(-4, 4));
       if (Math.hypot(v.x - avoid.x, v.z - avoid.z) < 44) continue;
       q.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, rng.range(0, Math.PI * 2));
       s.setScalar(rng.range(0.8, 1.5));
