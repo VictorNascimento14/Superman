@@ -49,7 +49,7 @@ export function createHud(layout) {
     <div class="help">
       <b>Mouse</b> olhar e mirar<br><b>W A S D</b> voar / andar<br><b>Espaço · C</b> subir · descer<br>
       <b>Shift</b> acelerar (segure: supersônico)<br><b>Botão direito · F</b> visão de calor<br>
-      <b>N</b> pular missão · <b>T</b> hora do dia · <b>Esc</b> pausa</div>`;
+      <b>N</b> pular missão · <b>M</b> som · <b>T</b> hora do dia · <b>Esc</b> pausa</div>`;
   document.body.appendChild(el);
   const $ = (s) => el.querySelector(s);
   const ui = {

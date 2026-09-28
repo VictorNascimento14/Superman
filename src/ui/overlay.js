@@ -14,6 +14,7 @@ export function createOverlay(onStart) {
         <dt>Shift</dt><dd>acelerar — segure para supervelocidade</dd>
         <dt>Botão direito · F</dt><dd>visão de calor</dd>
         <dt>N</dt><dd>pular missão</dd>
+        <dt>M</dt><dd>som liga/desliga</dd>
         <dt>T</dt><dd>hora do dia</dd>
         <dt>Esc</dt><dd>pausa</dd>
       </dl>
