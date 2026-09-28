@@ -148,8 +148,10 @@ export function collisionBoxes(layout) {
       boxes.push({ minX: t.x - t.w / 2, minY: t.y0, minZ: t.z - t.d / 2, maxX: t.x + t.w / 2, maxY: t.y1, maxZ: t.z + t.d / 2 });
     }
     if (b.globe) {
+      // Caixa a 75% do raio: com o raio inteiro o herói ficava em pé no ar nas quinas.
       const g = b.globe;
-      boxes.push({ minX: g.x - g.r, minY: b.h, minZ: g.z - g.r, maxX: g.x + g.r, maxY: g.y + g.r, maxZ: g.z + g.r });
+      const r = g.r * 0.75;
+      boxes.push({ minX: g.x - r, minY: b.h, minZ: g.z - r, maxX: g.x + r, maxY: g.y + r, maxZ: g.z + r });
     }
   }
   return boxes;
