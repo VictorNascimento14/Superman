@@ -18,7 +18,7 @@
   };
   const takeoff = () => g.flight.mode === 'ground';
   g.start();
-  setInterval(() => {
+  const loop = setInterval(() => {
     const m = g.missions.current;
     g.heat(false);
     if (!m) return g.autopilot({ jump: takeoff() });
@@ -54,4 +54,5 @@
     g.heat(true);
     return undefined;
   }, 40);
+  window.__autopilotStop = () => clearInterval(loop); // cenários depois das missões
 })();

@@ -16,6 +16,11 @@ export const FLIGHT = {
   footDepth: 1.04, // pélvis → sola do modelo em pé (hero.js monta as pernas para bater com isto)
 };
 
+// Atravessar prédio, voando: bater com pelo menos `speed` m/s para dentro da parede fura em
+// vez de parar. Quebrar a fachada custa `entry`; cada metro de prédio, `perMeter` por m/s.
+// Lá dentro a velocidade não cai abaixo de `min`: quem entrou sai do outro lado.
+export const SMASH = { speed: 30, entry: 6, perMeter: 0.012, min: 10 };
+
 const UP = new Vector3(0, 1, 0);
 
 export function viewDirection(yaw, pitch, out = new Vector3()) {
@@ -56,13 +61,72 @@ export function createFlight(collision, spawn) {
 
   const feetClearance = () => (s.mode === 'ground' ? FLIGHT.footDepth : FLIGHT.radius);
 
+  // Caixas que o herói está atravessando agora (−1 = vaga): a colisão não as empurra até ele
+  // sair do outro lado. Quatro vagas bastam: um nível e os vizinhos que ele pegar de raspão.
+  const smashing = [-1, -1, -1, -1];
+  let smashCount = 0;
+
+  const setSpeed = (v) => {
+    const sp = s.vel.length();
+    if (sp > 1e-6) s.vel.multiplyScalar(v / sp);
+  };
+
+  function enterBuilding(idx, nx, ny, nz) {
+    smashing[smashing.indexOf(-1)] = idx;
+    smashCount++;
+    const speed = s.vel.length();
+    const b = collision.boxes[idx];
+    s.events.push({
+      type: 'breach', entry: true, box: idx, speed,
+      // Ponto da caixa mais perto do centro: está na fachada (centro − normal·raio ficaria
+      // dentro da parede quando a esfera já entrou um pouco).
+      at: new Vector3(MathUtils.clamp(s.pos.x, b.minX, b.maxX), MathUtils.clamp(s.pos.y, b.minY, b.maxY), MathUtils.clamp(s.pos.z, b.minZ, b.maxZ)),
+      normal: new Vector3(nx, ny, nz), dir: s.vel.clone().divideScalar(speed),
+    });
+    setSpeed(Math.max(SMASH.min, speed - SMASH.entry));
+  }
+
+  // A cada subpasso: quem ainda está dentro perde velocidade pelo caminho; quem saiu deixa o
+  // furo de saída no ponto da caixa mais perto do centro — a face por onde passou.
+  function traverse(h) {
+    for (let k = 0; k < smashing.length; k++) {
+      const idx = smashing[k];
+      if (idx < 0) continue;
+      const b = collision.boxes[idx];
+      const cx = MathUtils.clamp(s.pos.x, b.minX, b.maxX);
+      const cy = MathUtils.clamp(s.pos.y, b.minY, b.maxY);
+      const cz = MathUtils.clamp(s.pos.z, b.minZ, b.maxZ);
+      const dx = s.pos.x - cx;
+      const dy = s.pos.y - cy;
+      const dz = s.pos.z - cz;
+      const d2 = dx * dx + dy * dy + dz * dz;
+      const speed = s.vel.length();
+      if (d2 < FLIGHT.radius * FLIGHT.radius) {
+        // Cada metro custa perMeter × v: a 420 m/s o prédio freia mais que a 50.
+        setSpeed(Math.max(SMASH.min, speed - SMASH.perMeter * speed * speed * h));
+        continue;
+      }
+      smashing[k] = -1;
+      smashCount--;
+      const d = Math.sqrt(d2);
+      s.events.push({
+        type: 'breach', entry: false, box: idx, speed,
+        at: new Vector3(cx, cy, cz), normal: new Vector3(dx / d, dy / d, dz / d), dir: s.vel.clone().divideScalar(speed || 1),
+      });
+    }
+  }
+
   // Tira a componente da velocidade que entra em cada superfície tocada, uma de cada vez
   // (ver resolveSphere): cortar contra a soma normalizada de chão + parede convertia
-  // metade da velocidade horizontal em subida.
+  // metade da velocidade horizontal em subida. Voando rápido contra um prédio, fura.
   let hitSpeed = 0;
-  const clip = (nx, ny, nz) => {
+  const clip = (nx, ny, nz, idx) => {
     const into = s.vel.x * nx + s.vel.y * ny + s.vel.z * nz;
     if (into >= 0) return;
+    if (-into >= SMASH.speed && s.mode === 'air' && idx >= 0 && collision.boxes[idx].breakable && smashCount < smashing.length) {
+      enterBuilding(idx, nx, ny, nz);
+      return true; // atravessável: a colisão não empurra
+    }
     hitSpeed = Math.max(hitSpeed, -into);
     s.vel.x -= nx * into;
     s.vel.y -= ny * into;
@@ -80,9 +144,10 @@ export function createFlight(collision, spawn) {
       // Colide como esfera centrada na pélvis; em pé, a esfera "desce" até os pés.
       const lift = feetClearance() - FLIGHT.radius;
       s.pos.y -= lift;
-      const hit = collision.resolveSphere(s.pos, FLIGHT.radius, n, clip);
+      collision.resolveSphere(s.pos, FLIGHT.radius, n, clip, smashing);
       s.pos.y += lift;
-      if (hit) step.copy(s.vel).multiplyScalar(dt / steps);
+      if (smashCount) traverse(dt / steps);
+      step.copy(s.vel).multiplyScalar(dt / steps);
     }
     if (hitSpeed > FLIGHT.impactSpeed) s.events.push({ type: 'impact', speed: hitSpeed, at: s.pos.clone() });
   }
@@ -138,7 +203,8 @@ export function createFlight(collision, spawn) {
       if (before < FLIGHT.sound && s.vel.length() >= FLIGHT.sound) s.events.push({ type: 'sonicboom', at: s.pos.clone() });
       // Pouso: encostou no chão/telhado devagar, sem estar subindo.
       const g = groundHeight();
-      if (s.pos.y - FLIGHT.radius <= g + 0.15 && s.vel.length() < 18 && input.up <= 0 && s.vel.y <= 0.5) {
+      // Dentro de um prédio o "chão" de heightAt é o telhado dele: pousar ali teleportava.
+      if (smashCount === 0 && s.pos.y - FLIGHT.radius <= g + 0.15 && s.vel.length() < 18 && input.up <= 0 && s.vel.y <= 0.5) {
         s.mode = 'ground';
         s.pos.y = g + FLIGHT.footDepth;
         s.vel.y = 0;

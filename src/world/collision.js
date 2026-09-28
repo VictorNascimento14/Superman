@@ -40,8 +40,10 @@ export function createCollisionWorld(boxes, { cellSize = 64, floor = 0 } = {}) {
   let qr = 0;
   let qn = null;
   let qc = null;
+  let qskip = null;
   let qhit = false;
-  function pushOut(b) {
+  function pushOut(b, idx) {
+    if (qskip !== null && qskip.includes(idx)) return;
     const p = qp;
     const r = qr;
     const outNormal = qn;
@@ -54,13 +56,14 @@ export function createCollisionWorld(boxes, { cellSize = 64, floor = 0 } = {}) {
     let dz = p.z - cz;
     const d2 = dx * dx + dy * dy + dz * dz;
     if (d2 >= r * r) return;
-    qhit = true;
     if (d2 > 1e-9) {
       const d = Math.sqrt(d2);
+      // O contato decide antes do empurrão: `true` = atravessável (o herói fura o prédio).
+      if (onContact?.(dx / d, dy / d, dz / d, idx) === true) return;
+      qhit = true;
       const push = (r - d) / d;
       p.x += dx * push; p.y += dy * push; p.z += dz * push;
       outNormal.x += dx / d; outNormal.y += dy / d; outNormal.z += dz / d;
-      onContact?.(dx / d, dy / d, dz / d);
       return;
     }
     // Centro dentro da caixa (túnel por velocidade alta): sai pela face mais próxima.
@@ -72,24 +75,27 @@ export function createCollisionWorld(boxes, { cellSize = 64, floor = 0 } = {}) {
     let best = exits[0];
     for (const e of exits) if (e[0] < best[0]) best = e;
     [, dx, dy, dz] = best;
+    if (onContact?.(dx, dy, dz, idx) === true) return;
+    qhit = true;
     p.x += dx * best[0]; p.y += dy * best[0]; p.z += dz * best[0];
     outNormal.x += dx; outNormal.y += dy; outNormal.z += dz;
-    onContact?.(dx, dy, dz);
   }
 
   // Empurra a esfera para fora dos prédios e do chão. Devolve true se tocou algo;
   // `outNormal` recebe a soma das normais de contato (não normalizada). `onContact`, se
-  // vier, recebe cada normal unitária em separado: quem corta velocidade precisa delas uma
-  // a uma — chão + parede somados viram uma diagonal que joga o corpo para cima.
-  function resolveSphere(p, r, outNormal, onContact) {
-    qp = p; qr = r; qn = outNormal; qc = onContact; qhit = false;
+  // vier, recebe cada normal unitária em separado, com o índice da caixa (−1 = piso): quem
+  // corta velocidade precisa delas uma a uma — chão + parede somados viram uma diagonal que
+  // joga o corpo para cima. Se devolver `true`, a caixa não empurra (o herói a atravessa).
+  // `skip`: índices de caixas que ele já está atravessando.
+  function resolveSphere(p, r, outNormal, onContact, skip = null) {
+    qp = p; qr = r; qn = outNormal; qc = onContact; qskip = skip; qhit = false;
     outNormal.x = outNormal.y = outNormal.z = 0;
     forEachNear(p.x - r, p.z - r, p.x + r, p.z + r, pushOut);
     let hit = qhit;
     if (p.y < floor + r) {
       p.y = floor + r;
       outNormal.y += 1;
-      onContact?.(0, 1, 0);
+      onContact?.(0, 1, 0, -1);
       hit = true;
     }
     return hit;

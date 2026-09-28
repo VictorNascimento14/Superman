@@ -62,6 +62,15 @@ test('caixas de colisão: uma por nível, mais o globo, a laje da ilha e o grama
   assert.equal(collisionBoxes(layout).length, n + 2);
 });
 
+test('só os níveis dos prédios quebram: laje, gramado e globo não', () => {
+  const boxes = collisionBoxes(layout);
+  const tiers = layout.buildings.reduce((s, b) => s + b.tiers.length, 0);
+  assert.equal(boxes.filter((b) => b.breakable).length, tiers);
+  const s = boxes.at(-2); // laje da ilha
+  const p = boxes.at(-1); // gramado
+  assert.ok(!s.breakable && s.maxY === 0 && !p.breakable && p.maxY === LAWN);
+});
+
 test('chão da colisão igual ao da cena: rua 0, gramado LAWN, mar WATER_Y', () => {
   // Com o piso fixo em y = 0, o herói pousava com as pernas enterradas no parque e em pé
   // 1,2 m acima da água.

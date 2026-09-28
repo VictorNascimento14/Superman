@@ -13,6 +13,7 @@ import { createFlight, FLIGHT } from './player/flight.js';
 import { createChaseCamera } from './player/camera.js';
 import { createInput } from './core/input.js';
 import { createShockwaves } from './fx/shockwave.js';
+import { createBreachFx } from './fx/breach.js';
 import { createOverlay } from './ui/overlay.js';
 import { createHud } from './ui/hud.js';
 import { createHeatVision } from './powers/heatvision.js';
@@ -36,6 +37,7 @@ const traffic = createTraffic();
 const trafficView = createTrafficView(scene, traffic);
 const hero = createHero(scene);
 const shockwaves = createShockwaves(scene);
+const breachFx = createBreachFx(scene);
 const heatVision = createHeatVision(scene, hero, collision, camera);
 
 // Nasce na sacada do terceiro recuo do Planeta Diário, olhando para o centro.
@@ -57,6 +59,7 @@ const audio = createAudio();
 input.onKey('KeyM', () => hud.toast(audio.toggleMute() ? 'SOM DESLIGADO' : 'SOM LIGADO', 1));
 
 let paused = true;
+let dustLevel = 0;
 const resume = () => {
   overlay.hide();
   hud.show();
@@ -128,6 +131,11 @@ renderer.setAnimationLoop(() => {
       chase.shake(0.9);
       hud.toast('BARREIRA DO SOM');
       audio.sonicBoom();
+    } else if (e.type === 'breach') {
+      // Furou a fachada (entrada) ou saiu do outro lado: a saída espalha mais entulho.
+      breachFx.spawn(e);
+      chase.shake(Math.min(1, e.speed / (e.entry ? 160 : 240)));
+      audio.breach(Math.min(1, e.speed / 200), e.entry);
     } else if (e.type === 'impact') {
       chase.shake(Math.min(1, e.speed / 200));
       audio.impact(Math.min(1, e.speed / 300));
@@ -142,11 +150,18 @@ renderer.setAnimationLoop(() => {
   hero.root.quaternion.copy(flight.orientation);
   hero.update(dt, { pose: flight.pose, walk: flight.walk, velocity: flight.vel, t: elapsed });
   shockwaves.update(dt);
+  breachFx.update(dt, camera, collision.heightAt, renderer.domElement.height);
 
   if (debug.cam) {
     camera.position.copy(flight.pos).add(debug.cam);
     camera.lookAt(flight.pos);
   } else chase.update(dt, flight, heatVision.firing);
+
+  // Câmera dentro de um prédio (atravessando junto com o herói): poeira na tela. As paredes
+  // são cascas de face única e, lá de dentro, a cidade apareceria "de raio-x".
+  const inside = collision.heightAt(camera.position.x, camera.position.z) > camera.position.y;
+  dustLevel = inside ? 1 : dustLevel * Math.exp(-dt * 4);
+  hud.setDust(dustLevel);
 
   // A mira sai da câmera: atualizar depois dela. Botão direito ou F.
   const wantsHeat = !paused && (input.mouseDown(2) || input.isDown('KeyF'));
@@ -176,6 +191,7 @@ window.__game = {
   hud,
   heatVision,
   missions,
+  destruction: breachFx,
   audio,
   heat: (on) => { debug.heat = on; },
   autopilot: (m) => { debug.autopilot = m ? { forward: 0, right: 0, up: 0, boost: false, jump: false, ...m } : null; },
