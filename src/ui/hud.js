@@ -15,7 +15,7 @@ const CSS = `
 #hud .map { position: absolute; right: 22px; bottom: 22px; width: 200px; height: 200px; border-radius: 50%; border: 2px solid rgba(255,255,255,.35); box-shadow: 0 4px 18px rgba(0,0,0,.45); }
 #hud .objective { position: absolute; top: 18px; left: 50%; transform: translateX(-50%); padding: 8px 16px; background: rgba(10,20,45,.55); border-radius: 8px; text-align: center; max-width: 70vw; }
 #hud .objective:empty { display: none; }
-#hud .toast { position: absolute; top: 28%; left: 50%; transform: translateX(-50%); font: 800 30px/1.1 Georgia, serif; letter-spacing: .04em; color: #fff; opacity: 0; transition: opacity .25s; text-align: center; }
+#hud .toast { position: absolute; top: 28%; left: 50%; transform: translateX(-50%); font: 800 30px/1.1 Georgia, serif; letter-spacing: .04em; color: #fff; opacity: 0; transition: opacity .25s; text-align: center; text-shadow: 0 2px 12px rgba(0,0,0,.9), 0 0 3px rgba(0,0,0,.9); -webkit-text-stroke: 1px rgba(0,0,0,.35); }
 #hud .toast.on { opacity: 1; }
 #hud .cross { position: absolute; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%; background: rgba(255,255,255,.8); box-shadow: 0 0 0 2px rgba(0,0,0,.25); }
 #hud .energy { position: absolute; left: 50%; bottom: 26px; width: 180px; height: 5px; margin-left: -90px; background: rgba(255,255,255,.15); border-radius: 3px; overflow: hidden; }
@@ -49,7 +49,7 @@ export function createHud(layout) {
     <div class="help">
       <b>Mouse</b> olhar e mirar<br><b>W A S D</b> voar / andar<br><b>Espaço · C</b> subir · descer<br>
       <b>Shift</b> acelerar (segure: supersônico)<br><b>Botão direito · F</b> visão de calor<br>
-      <b>T</b> hora do dia · <b>Esc</b> pausa</div>`;
+      <b>N</b> pular missão · <b>T</b> hora do dia · <b>Esc</b> pausa</div>`;
   document.body.appendChild(el);
   const $ = (s) => el.querySelector(s);
   const ui = {

@@ -12,6 +12,8 @@ export function createOverlay(onStart) {
         <dt>W A S D</dt><dd>voar / andar</dd>
         <dt>Espaço · C</dt><dd>subir (decolar) · descer</dd>
         <dt>Shift</dt><dd>acelerar — segure para supervelocidade</dd>
+        <dt>Botão direito · F</dt><dd>visão de calor</dd>
+        <dt>N</dt><dd>pular missão</dd>
         <dt>T</dt><dd>hora do dia</dd>
         <dt>Esc</dt><dd>pausa</dd>
       </dl>

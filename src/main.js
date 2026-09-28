@@ -16,6 +16,7 @@ import { createShockwaves } from './fx/shockwave.js';
 import { createOverlay } from './ui/overlay.js';
 import { createHud } from './ui/hud.js';
 import { createHeatVision } from './powers/heatvision.js';
+import { createMissions } from './game/missions.js';
 
 const app = document.getElementById('app');
 const qualityName = pickQuality();
@@ -46,8 +47,11 @@ const input = createInput(renderer.domElement);
 const move = { forward: 0, right: 0, up: 0, boost: false, jump: false };
 
 const hud = createHud(layout);
-hud.setMarkers([{ x: planet.x, z: planet.z, color: '#f2c230' }]);
+const missions = createMissions({ scene, collision, layout, heatVision, hud });
+missions.setBaseMarkers([{ x: planet.x, z: planet.z, color: '#e8e8e8' }]);
 input.onKey('KeyH', () => hud.toggleHelp());
+input.onKey('KeyN', () => missions.skip());
+const prevPos = new THREE.Vector3();
 
 let paused = true;
 const start = () => {
@@ -101,7 +105,9 @@ renderer.setAnimationLoop(() => {
     flight.pitch = THREE.MathUtils.clamp(flight.pitch - look.dy * LOOK, -1.45, 1.45);
     if (debug.autopilot) Object.assign(move, debug.autopilot);
     else input.read(move);
+    prevPos.copy(flight.pos);
     flight.update(dt, move);
+    missions.update(dt, flight, prevPos, elapsed);
     if (debug.autopilot) debug.autopilot.jump = false;
   }
   for (const e of flight.events) {
@@ -149,6 +155,7 @@ window.__game = {
   start,
   hud,
   heatVision,
+  missions,
   heat: (on) => { debug.heat = on; },
   autopilot: (m) => { debug.autopilot = m ? { forward: 0, right: 0, up: 0, boost: false, jump: false, ...m } : null; },
   camHero: (x, y, z) => { debug.cam = new THREE.Vector3(x, y, z); },
