@@ -62,7 +62,7 @@ Divergência entre cofre e código se corrige **no mesmo PR** que a descobriu.
 ### Checks
 
 ```bash
-npm test        # node --test tests/
+npm test        # node --test "tests/**/*.test.js"
 npm run build   # vite build
 ```
 
