@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { createFlight, FLIGHT, SMASH } from '../src/player/flight.js';
 import { createCollisionWorld } from '../src/world/collision.js';
 import { EARTH, SPACE } from '../src/space/nav.js';
+import { solarSystem, SUN_I } from '../src/space/bodies.js';
+import { Vector3 } from 'three';
 
 // Um prédio de 10 × 50 × 10 em x ∈ [0, 10], z ∈ [100, 110].
 const world = createCollisionWorld([{ minX: 0, minY: 0, minZ: 100, maxX: 10, maxY: 50, maxZ: 110 }]);
@@ -202,4 +204,48 @@ test('espaço: do outro lado da Terra, o chão plano da cidade não puxa o heró
   run(f, idle, 1);
   assert.ok(f.pos.y < -EARTH.radius, `puxado para y = ${f.pos.y}`);
   assert.ok(Math.abs(f.altitude - 5e5) < 1, `altitude ${f.altitude}`);
+});
+
+// --- Sistema solar: a mesma lei de velocidade, com o corpo mais perto no lugar da Terra.
+const solar = solarSystem(new Vector3(0.3, 0.5, -0.8).normalize());
+const surface = (f, b) => Math.hypot(f.pos.x - b.x, f.pos.y - b.y, f.pos.z - b.z) - b.radius;
+function aimAt(f, b) {
+  const d = new Vector3(b.x - f.pos.x, b.y - f.pos.y, b.z - f.pos.z).normalize();
+  f.yaw = Math.atan2(d.x, d.z);
+  f.pitch = Math.asin(d.y);
+}
+
+test('sistema solar: da Terra ao Sol com boost leva de 10 s a 60 s, e para sem atravessar', () => {
+  const sun = solar[SUN_I];
+  const f = inSpace(0, 25e3, 0, 0);
+  f.bodies = solar;
+  aimAt(f, sun);
+  let t = 0;
+  let low = Infinity;
+  while (surface(f, sun) > 1e8 && t < 90) {
+    f.update(1 / 60, boostUp);
+    t += 1 / 60;
+  }
+  assert.ok(t > 10 && t < 60, `levou ${t.toFixed(1)} s`);
+  for (let k = 0; k < 20 * 60; k++) {
+    f.update(1 / 60, boostUp);
+    low = Math.min(low, surface(f, sun));
+  }
+  assert.ok(low > sun.floor - 1, `desceu a ${low} m da superfície do Sol`);
+  assert.equal(f.nearest.i, SUN_I);
+});
+
+test('sistema solar: mergulhando em Júpiter a toda, para no piso dele e não atravessa', () => {
+  const jup = solar.find((b) => b.name === 'JÚPITER');
+  const f = inSpace(jup.x, jup.y, jup.z - 1e9, 0);
+  f.bodies = solar;
+  aimAt(f, jup);
+  let low = Infinity;
+  for (let t = 0; t < 30; t += 1 / 60) {
+    f.update(1 / 60, boostUp);
+    low = Math.min(low, surface(f, jup));
+  }
+  assert.ok(low > jup.floor - 1, `desceu a ${low} m`);
+  assert.ok(surface(f, jup) < 2 * jup.floor, `não chegou: ${surface(f, jup)} m`);
+  assert.equal(solar[f.nearest.i].name, 'JÚPITER');
 });

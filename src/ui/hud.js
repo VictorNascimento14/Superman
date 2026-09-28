@@ -35,6 +35,16 @@ const MODE_LABEL = { idle: 'EM PÉ', hover: 'PAIRANDO', fly: 'VOO', flyFast: 'VE
 const LIGHT = 299792458; // m/s: em escala real, a hipervelocidade passa da luz
 const NUM0 = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 0 });
 const NUM1 = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 1 });
+// Distância legível: km até 1 milhão; depois milhões e bilhões de km (1,5 milhão, 4,3 bilhões).
+export function distance(m) {
+  const km = m / 1000;
+  if (km < 1e6) return `${NUM0.format(km)} km`;
+  const big = km >= 1e9;
+  const n = big ? km / 1e9 : km / 1e6;
+  return `${NUM1.format(n)} ${big ? 'bilh' : 'milh'}${n < 2 ? 'ão' : 'ões'} de km`;
+}
+// Distância de objetivo: metros perto; longe (do espaço), o formato de cima.
+export const goalDistance = (m) => (m < 1e4 ? `${Math.round(m)} m` : distance(m));
 const MAP_PX = 512;
 const MAP_EXT = HALF + 200; // metros do centro até a borda do mapa
 
@@ -144,8 +154,8 @@ export function createHud(layout) {
       const b = beacons[i];
       set(`beaconOn${i}`, b.style, on ? 'block' : 'none', 'display');
       if (!on) return;
-      b.style.transform = `translate(${x.toFixed(0)}px, ${y.toFixed(0)}px)`;
-      set(`beacon${i}`, b, `${name} · ${NUM0.format(meters / 1000)} km`);
+      set(`beaconAt${i}`, b.style, `translate(${x.toFixed(0)}px, ${y.toFixed(0)}px)`, 'transform');
+      set(`beacon${i}`, b, `${name} · ${distance(meters)}`);
     },
     // Poeira na tela (0–1) enquanto a câmera atravessa um prédio com o herói.
     setDust: (k) => set('dust', ui.dust.style, k < 0.01 ? '0' : k.toFixed(2), 'opacity'),
@@ -161,9 +171,14 @@ export function createHud(layout) {
       set('speed', ui.speed, sp < 1000 ? String(Math.round(sp * 3.6)) : (kms < 100 ? NUM1 : NUM0).format(kms));
       set('unit', ui.unit, sp < 1000 ? 'km/h' : sp > LIGHT ? `km/s · ${NUM1.format(sp / LIGHT)}× a luz` : 'km/s');
       set('bar', ui.bar.style, `${Math.min(100, (sp / 420) * 100).toFixed(0)}%`, 'width');
-      // No espaço, a altitude é até a superfície da Terra, em km.
+      // No espaço, a altitude é até a superfície da Terra; perto de outro corpo, até a dele.
       const space = flight.altitude > 20e3;
-      set('alt', ui.alt, space ? `altitude ${NUM0.format(flight.altitude / 1000)} km` : `${Math.max(0, Math.round(flight.pos.y - groundY))} m acima do solo · ${Math.round(flight.pos.y)} m`);
+      let alt = `${Math.max(0, Math.round(flight.pos.y - groundY))} m acima do solo · ${Math.round(flight.pos.y)} m`;
+      if (space) {
+        const near = flight.bodies[flight.nearest.i];
+        alt = flight.nearest.i > 0 ? `${near.name} a ${distance(flight.nearest.d)}` : `altitude ${distance(flight.altitude)}`;
+      }
+      set('alt', ui.alt, alt);
       const mode = space && sp > 420 ? 'hyper' : flight.supersonic ? 'super' : flight.pose;
       set('mode', ui.mode, MODE_LABEL[mode]);
       set('modeCls', ui.mode, mode === 'super' || mode === 'hyper' ? `mode ${mode}` : 'mode', 'className');

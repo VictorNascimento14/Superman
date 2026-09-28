@@ -3,6 +3,8 @@ import { createRenderer } from './render/renderer.js';
 import { createSky, TIME_ORDER } from './render/sky.js';
 import { createPost } from './render/post.js';
 import { createSpace } from './space/space.js';
+import { solarSystem, sunlight, SUN_I } from './space/bodies.js';
+import { EARTH, nearCity } from './space/nav.js';
 import { QUALITY, pickQuality } from './render/quality.js';
 import { generateLayout, collisionBoxes, WATER_Y } from './world/layout.js';
 import { createCollisionWorld } from './world/collision.js';
@@ -39,9 +41,11 @@ const origin = new THREE.Vector3();
 const FLOAT_FROM = 20e3; // m do centro da cidade: além disto, a origem acompanha o herói
 const lookAtV = new THREE.Vector3();
 const beaconV = new THREE.Vector3();
-// Marcador na tela para um ponto verdadeiro (referencial da cidade): fora de vista, fica preso
-// à borda, apontando para onde virar.
-function beacon(i, name, x, y, z) {
+const beaconAt = new Float32Array(24); // posições já ocupadas neste quadro (x, y)
+let beacons = 0;
+// Marcador na tela para um ponto verdadeiro (referencial da cidade). Com `edge`, fora de vista
+// fica preso à borda, apontando para onde virar; sem ele, só aparece quando está na tela.
+function beacon(i, name, x, y, z, edge) {
   const meters = beaconV.set(x, y, z).distanceTo(flight.pos);
   // Atrás da câmera é z > 0 em espaço de câmera. Depois da projeção não dá para saber: ponto
   // além do far (a cidade a 7.000 km) também sai com z > 1.
@@ -52,8 +56,19 @@ function beacon(i, name, x, y, z) {
   let sy = beaconV.y;
   if (behind) { sx = -sx; sy = -sy; }
   const m = Math.max(Math.abs(sx), Math.abs(sy), 1e-6);
-  if (behind || m > 0.92) { sx *= 0.92 / m; sy *= 0.92 / m; }
-  hud.setBeacon(i, name, ((sx + 1) / 2) * window.innerWidth, ((1 - sy) / 2) * window.innerHeight, meters, true);
+  const off = behind || m > 0.92;
+  if (off && !edge) return hud.setBeacon(i, '', 0, 0, 0, false);
+  if (off) { sx *= 0.92 / m; sy *= 0.92 / m; }
+  const px = ((sx + 1) / 2) * window.innerWidth;
+  const py = ((1 - sy) / 2) * window.innerHeight;
+  // Um marcador por lugar: vista do Sol, a Lua cai em cima da Terra.
+  for (let k = 0; k < beacons * 2; k += 2) {
+    if (Math.abs(beaconAt[k] - px) < 90 && Math.abs(beaconAt[k + 1] - py) < 18) return hud.setBeacon(i, '', 0, 0, 0, false);
+  }
+  beaconAt[beacons * 2] = px;
+  beaconAt[beacons * 2 + 1] = py;
+  beacons++;
+  hud.setBeacon(i, name, px, py, meters, true);
 }
 const sky = createSky(scene, renderer, preset, world);
 
@@ -120,13 +135,27 @@ document.addEventListener('pointerlockchange', () => {
   }
 });
 
+// O sistema solar gira em volta da Terra com a hora do dia (é a Terra girando): muda junto.
+let bodies = [];
+const toSun = new THREE.Vector3();
+const setBodies = () => {
+  bodies = solarSystem(sky.state.sunTrue);
+  flight.bodies = bodies;
+  space.setBodies(bodies);
+};
+setBodies();
 let timeIdx = TIME_ORDER.indexOf('dia');
 const setTime = (name) => {
   sky.setTime(name);
   post.setExposure(sky.state.exposure);
   timeIdx = TIME_ORDER.indexOf(name);
+  setBodies();
 };
-input.onKey('KeyT', () => setTime(TIME_ORDER[(timeIdx + 1) % TIME_ORDER.length]));
+// Longe da Terra, mudar a hora giraria o sistema inteiro e tiraria o planeta de perto do herói.
+input.onKey('KeyT', () => {
+  if (flight.altitude > 1e8) hud.toast('O DIA SÓ MUDA PERTO DA TERRA', 1.5);
+  else setTime(TIME_ORDER[(timeIdx + 1) % TIME_ORDER.length]);
+});
 
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -208,8 +237,9 @@ renderer.setAnimationLoop(() => {
   } else chase.update(dt, flight, heatVision.firing);
 
   // Câmera dentro de um prédio (atravessando junto com o herói): poeira na tela. As paredes
-  // são cascas de face única e, lá de dentro, a cidade apareceria "de raio-x".
-  const inside = collision.heightAt(camera.position.x, camera.position.z) > camera.position.y;
+  // são cascas de face única e, lá de dentro, a cidade apareceria "de raio-x". O chão da cidade
+  // só existe no mundo plano: abaixo do plano dela, em Júpiter, não há prédio nenhum.
+  const inside = nearCity(camera.position) && collision.heightAt(camera.position.x, camera.position.z) > camera.position.y;
   dustLevel = inside ? 1 : dustLevel * Math.exp(-dt * 4);
   hud.setDust(dustLevel);
 
@@ -231,16 +261,28 @@ renderer.setAnimationLoop(() => {
   scene.fog.near = 700 + alt * 0.6;
   scene.fog.far = preset.viewDistance * 1.2 + alt * 1.6;
   post.setSpace(alt > 2.5e3);
-  audio.update(paused ? 0 : flight.speed * (1 - spaceK), flight.pos.y - groundY, heatVision.firing, heatVision.hitting);
+  // No espaço a luz do herói é o Sol de verdade, visto de onde ele está — e some na sombra da
+  // Terra (ou de qualquer corpo entre ele e o Sol).
+  const sun = bodies[SUN_I];
+  toSun.set(sun.x - flight.pos.x, sun.y - flight.pos.y, sun.z - flight.pos.z).normalize();
+  sky.setSunlight(toSun, spaceK, spaceK > 0 ? sunlight(bodies, flight.pos) : 1);
+  audio.update(paused ? 0 : flight.speed * (1 - spaceK), nearCity(flight.pos) ? flight.pos.y - groundY : flight.altitude, heatVision.firing, heatVision.hitting);
   sky.update(dt, flight.pos, elapsed);
   city.update(dt, elapsed, sky.state.night);
   traffic.update(dt);
   trafficView.update(sky.state.night, elapsed, camera.position);
-  if (alt > 2.5e3) space.update(camera, camera.position, sky.state.sunTrue, elapsed);
-  // No espaço, Metrópolis vira um marcador: lá de cima a ilha tem menos de um pixel.
+  if (alt > 2.5e3) space.update(camera, camera.position, elapsed, (camera.fov * THREE.MathUtils.DEG2RAD) / window.innerHeight);
+  // No espaço, Metrópolis vira um marcador (lá de cima a ilha tem menos de um pixel) e, depois
+  // da Lua, a Terra inteira. O Sol também fica preso à borda; os outros corpos só aparecem na tela.
   camera.updateMatrixWorld();
-  if (alt > 20e3) beacon(0, 'METRÓPOLIS', 0, 0, 0);
-  else hud.setBeacon(0, '', 0, 0, 0, false);
+  beacons = 0;
+  if (alt > 20e3) {
+    beacon(0, alt > 5e7 ? 'TERRA' : 'METRÓPOLIS', 0, alt > 5e7 ? -EARTH.radius : 0, 0, true);
+    beacon(SUN_I, sun.name, sun.x, sun.y, sun.z, true);
+    for (let i = 2; i < bodies.length; i++) beacon(i, bodies[i].name, bodies[i].x, bodies[i].y, bodies[i].z, false);
+  } else {
+    for (let i = 0; i < bodies.length; i++) hud.setBeacon(i, '', 0, 0, 0, false);
+  }
   post.render(dt);
 });
 

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { createRng } from '../core/rng.js';
 import { streetLine, CITY } from '../world/layout.js';
 import { ringCrossed, makeRingCourse, stepFaller, tryCatch, burnDrone, DRONE } from './missionLogic.js';
+import { goalDistance } from '../ui/hud.js';
 
 // Missões em rodízio: treino de anéis → resgate → drones → … Cada uma tem início,
 // objetivo no HUD, marcador no minimapa, sucesso ou falha, e 4 s de respiro.
@@ -197,7 +198,7 @@ export function createMissions({ scene, collision, layout, heatVision, hud }) {
     if (m.time <= 0) return end(false);
     const nr = m.course[m.next];
     markers.push({ x: nr.x, z: nr.z, color: COLORS.aneis });
-    hud.setObjective(`TREINO DE VOO — anel ${m.next + 1}/${m.course.length} · ${fmt(m.time)} · ${Math.round(dist(flight.pos, nr))} m`);
+    hud.setObjective(`TREINO DE VOO — anel ${m.next + 1}/${m.course.length} · ${fmt(m.time)} · ${goalDistance(dist(flight.pos, nr))}`);
   }
 
   function updateRescue(dt, flight, t) {
@@ -230,7 +231,7 @@ export function createMissions({ scene, collision, layout, heatVision, hud }) {
     m.fig.position.set(f.x, f.y - 0.9, f.z);
     markers.push({ x: f.x, z: f.z, color: COLORS.resgate });
     const msg = { waiting: 'RESGATE — alguém está na beirada do prédio marcado!', falling: 'PEGUE A PESSOA ANTES DO CHÃO!', caught: 'Salvo! Pouse em qualquer lugar para deixá-lo em segurança' }[f.state];
-    hud.setObjective(`${msg} · ${Math.round(dist(flight.pos, f))} m`);
+    hud.setObjective(`${msg} · ${goalDistance(dist(flight.pos, f))}`);
   }
 
   function updateDrones(dt, flight, t) {
@@ -251,7 +252,7 @@ export function createMissions({ scene, collision, layout, heatVision, hud }) {
     }
     if (alive === 0) return end(true, 200 + Math.round(m.time));
     if (m.time <= 0) return end(false);
-    hud.setObjective(`DRONES HOSTIS — ${alive} restantes · ${fmt(m.time)} · ${Math.round(nearest)} m · visão de calor: botão direito / F`);
+    hud.setObjective(`DRONES HOSTIS — ${alive} restantes · ${fmt(m.time)} · ${goalDistance(nearest)} · visão de calor: botão direito / F`);
   }
 
   return {

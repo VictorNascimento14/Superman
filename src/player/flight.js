@@ -1,5 +1,5 @@
 import { Vector3, Quaternion, Matrix4, MathUtils } from 'three';
-import { altitude, fromCity, nearCity, upAt, speedCap, EARTH, SPACE } from '../space/nav.js';
+import { altitude, fromCity, nearCity, speedCap, nearestSurface, EARTH_ONLY, SPACE } from '../space/nav.js';
 
 // Física de voo. Só usa as classes de matemática do three (rodam no Node sem DOM),
 // por isso é testada em tests/flight.test.js.
@@ -43,6 +43,8 @@ export function createFlight(collision, spawn) {
     events: [], // { type: 'sonicboom' | 'impact' | 'takeoff' | 'land', ... } — consumidos por quem desenha
     orientation: new Quaternion(),
     altitude: 0, // até a superfície da Terra (esfera), não até o chão da cidade
+    bodies: EARTH_ONLY, // corpos celestes (o primeiro é a Terra); o jogo põe o sistema solar
+    nearest: { i: 0, d: 0 }, // corpo com a superfície mais perto e a distância até ela
   };
   // Vetores de trabalho: nada aloca no update (invariante 2).
   const dir = new Vector3();
@@ -160,12 +162,16 @@ export function createFlight(collision, spawn) {
     if (hitSpeed > FLIGHT.impactSpeed) s.events.push({ type: 'impact', speed: hitSpeed, at: s.pos.clone() });
   }
 
-  // Só Metrópolis tem chão: fora do mundo plano, o herói não desce abaixo de SPACE.floor —
-  // é empurrado de volta pela vertical local e perde a componente que entra.
-  function floorOutsideCity() {
-    if (fromCity(s.pos) <= SPACE.flatRadius || altitude(s.pos) >= SPACE.floor) return;
-    upAt(s.pos, n);
-    s.pos.set(n.x * (EARTH.radius + SPACE.floor), n.y * (EARTH.radius + SPACE.floor) - EARTH.radius, n.z * (EARTH.radius + SPACE.floor));
+  // Só Metrópolis tem chão: fora do mundo plano, o herói não desce abaixo de SPACE.floor na
+  // Terra, nem abaixo do piso de outro corpo — é empurrado de volta pela vertical local e
+  // perde a componente que entra.
+  function floorBodies() {
+    const { i } = nearestSurface(s.bodies, s.pos, s.nearest);
+    const b = s.bodies[i];
+    if (s.nearest.d >= b.floor || (i === 0 && fromCity(s.pos) <= SPACE.flatRadius)) return;
+    n.set(s.pos.x - b.x, s.pos.y - b.y, s.pos.z - b.z).normalize();
+    s.pos.set(b.x + n.x * (b.radius + b.floor), b.y + n.y * (b.radius + b.floor), b.z + n.z * (b.radius + b.floor));
+    s.nearest.d = b.floor;
     const into = s.vel.dot(n);
     if (into < 0) s.vel.addScaledVector(n, -into);
   }
@@ -207,9 +213,9 @@ export function createFlight(collision, spawn) {
       const wasSuper = s.supersonic;
       s.supersonic = s.boostTime > FLIGHT.supersonicAfter;
       const tier = s.supersonic ? 'supersonic' : input.boost ? 'boost' : 'cruise';
-      const alt = altitude(s.pos);
-      // No espaço, o boost vira hipervelocidade: o alvo cresce com a altitude, então a subida
-      // é exponencial (20 km → 20.000 km em ~10 s).
+      // O corpo mais perto comanda: no espaço, o boost vira hipervelocidade com alvo
+      // proporcional à distância até ele — a subida é exponencial e a chegada, suave.
+      const alt = nearestSurface(s.bodies, s.pos, s.nearest).d;
       const hyper = alt > SPACE.from && input.boost;
       if (thrust) {
         wish.copy(dir).multiplyScalar(input.forward).addScaledVector(right, input.right).addScaledVector(UP, input.up);
@@ -220,12 +226,12 @@ export function createFlight(collision, spawn) {
       } else {
         s.vel.multiplyScalar(Math.exp(-dt * FLIGHT.hoverDamp)); // pairar: o herói freia sozinho
       }
-      // Teto duro proporcional à altitude: em cada quadro anda bem menos que a distância até a
-      // Terra, então a aproximação é suave e nunca atravessa a superfície.
+      // Teto duro proporcional à distância: em cada quadro anda bem menos que ela, então a
+      // aproximação é suave e nunca atravessa a superfície de nada.
       const cap = speedCap(alt, FLIGHT.supersonic);
       if (s.vel.lengthSq() > cap * cap) s.vel.setLength(cap);
       move(dt);
-      floorOutsideCity();
+      floorBodies();
       if (!wasSuper && s.supersonic) s.events.push({ type: 'supersonic' });
       if (before < FLIGHT.sound && s.vel.length() >= FLIGHT.sound) s.events.push({ type: 'sonicboom', at: s.pos.clone() });
       // Pouso: encostou no chão/telhado devagar, sem estar subindo.
