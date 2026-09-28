@@ -116,6 +116,8 @@ export function createAudio() {
 
   return {
     start,
+    // Pausa: com a aba em segundo plano o loop para e o som ficaria tocando no último ganho.
+    suspend: () => ctx?.suspend(),
     // Depuração: mede o nível de saída (RMS) numa janela curta.
     probe(ms = 400) {
       if (!ctx) return Promise.resolve(null);
