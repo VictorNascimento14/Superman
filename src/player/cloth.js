@@ -67,13 +67,21 @@ export function createCloth({ cols, rows, topWidth, bottomWidth, length }) {
       }
     }
     for (let it = 0; it < iterations; it++) {
-      for (const [a, b, len, stiff] of cons) {
+      // Laço indexado e raiz à mão: roda por restrição × iteração × subpasso. Desestruturar
+      // no for…of passa pelo protocolo de iterador e o Math.hypot do V8 guarda os argumentos
+      // num array — juntos eram ~70% de tudo que o jogo alocava por quadro.
+      for (let j = 0; j < cons.length; j++) {
+        const con = cons[j];
+        const a = con[0];
+        const b = con[1];
+        const len = con[2];
+        const stiff = con[3];
         const ia = a * 3;
         const ib = b * 3;
         const dx = pos[ib] - pos[ia];
         const dy = pos[ib + 1] - pos[ia + 1];
         const dz = pos[ib + 2] - pos[ia + 2];
-        const d = Math.hypot(dx, dy, dz) || 1e-9;
+        const d = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1e-9;
         const wa = pinned[a] ? 0 : 1;
         const wb = pinned[b] ? 0 : 1;
         if (wa + wb === 0) continue;
@@ -93,4 +101,44 @@ export function createCloth({ cols, rows, topWidth, bottomWidth, length }) {
   }
 
   return { cols, rows, pos, vel, pinned, reset, setPin, step, at };
+}
+
+// Normais por vértice da grade (linha r, coluna c → r·cols + c): a mesma conta do
+// computeVertexNormals de uma PlaneGeometry com a mesma grade (soma de cb × ab das faces
+// vizinhas, com os triângulos (a, b, d) e (b, c, d) dela), mas sem alocar.
+export function gridNormals(pos, cols, rows, out) {
+  out.fill(0);
+  for (let r = 0; r < rows - 1; r++) {
+    for (let c = 0; c < cols - 1; c++) {
+      const a = r * cols + c;
+      const b = a + cols;
+      addFace(pos, out, a, b, a + 1);
+      addFace(pos, out, b, b + 1, a + 1);
+    }
+  }
+  for (let i = 0; i < out.length; i += 3) {
+    const l = Math.sqrt(out[i] * out[i] + out[i + 1] * out[i + 1] + out[i + 2] * out[i + 2]) || 1;
+    out[i] /= l;
+    out[i + 1] /= l;
+    out[i + 2] /= l;
+  }
+}
+
+// Normal do triângulo (a, b, c) pesada pela área (cb × ab, como o three), somada nos três.
+function addFace(pos, out, a, b, c) {
+  const ia = a * 3;
+  const ib = b * 3;
+  const ic = c * 3;
+  const cbx = pos[ic] - pos[ib];
+  const cby = pos[ic + 1] - pos[ib + 1];
+  const cbz = pos[ic + 2] - pos[ib + 2];
+  const abx = pos[ia] - pos[ib];
+  const aby = pos[ia + 1] - pos[ib + 1];
+  const abz = pos[ia + 2] - pos[ib + 2];
+  const nx = cby * abz - cbz * aby;
+  const ny = cbz * abx - cbx * abz;
+  const nz = cbx * aby - cby * abx;
+  out[ia] += nx; out[ia + 1] += ny; out[ia + 2] += nz;
+  out[ib] += nx; out[ib + 1] += ny; out[ib + 2] += nz;
+  out[ic] += nx; out[ic + 1] += ny; out[ic + 2] += nz;
 }

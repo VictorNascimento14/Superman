@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { createCloth } from './cloth.js';
+import { createCloth, gridNormals } from './cloth.js';
 
 // Herói montado com primitivas (ADR-001). A origem do `root` é a pélvis; em pé, a sola
 // fica `FLIGHT.footDepth` (flight.js, 1,04 m já com a escala) abaixo dela. O corpo olha
@@ -366,12 +366,17 @@ function createCape(rig, mat) {
       cloth.step(SUBSTEP, gravity, air, 3 + Math.min(sp, 60) * 0.12, 5, collide);
       acc -= SUBSTEP;
     }
-    const posAttr = geo.attributes.position;
-    for (let i = 0; i < posAttr.count; i++) {
-      posAttr.setXYZ(i, cloth.pos[i * 3] + origin.x, cloth.pos[i * 3 + 1] + origin.y, cloth.pos[i * 3 + 2] + origin.z);
+    // Direto nos arrays: o setXYZ encaixota os doubles dos argumentos, e o computeVertexNormals
+    // varre os 132 triângulos alocando — juntos, ~1 MB/s.
+    const posArr = geo.attributes.position.array;
+    for (let i = 0; i < cloth.pos.length; i += 3) {
+      posArr[i] = cloth.pos[i] + origin.x;
+      posArr[i + 1] = cloth.pos[i + 1] + origin.y;
+      posArr[i + 2] = cloth.pos[i + 2] + origin.z;
     }
-    posAttr.needsUpdate = true;
-    geo.computeVertexNormals();
+    geo.attributes.position.needsUpdate = true;
+    gridNormals(cloth.pos, CAPE.cols, CAPE.rows, geo.attributes.normal.array);
+    geo.attributes.normal.needsUpdate = true;
   }
 
   return { mesh, update, reset };
