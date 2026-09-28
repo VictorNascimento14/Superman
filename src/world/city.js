@@ -68,6 +68,7 @@ export function createCity(scene, layout, renderer, openings = null) {
   }
   const roofMat = new THREE.MeshStandardMaterial({ map: tex.roof, roughness: 0.95 });
   const trimMat = new THREE.MeshStandardMaterial({ color: 0xb9ad96, roughness: 0.8 });
+  const capMat = new THREE.MeshStandardMaterial({ color: 0x6f6a63, roughness: 0.95 }); // corte de um segmento que cai
   const roofGeo = roofs.build();
   const trimGeo = trims.build();
   group.add(shadowed(new THREE.Mesh(roofGeo, roofMat), false));
@@ -106,22 +107,39 @@ export function createCity(scene, layout, renderer, openings = null) {
     }
   }
 
-  // A parte do prédio acima de yFrom, idêntica à original (mesmas janelas, mesmo tom), com a
-  // origem no centro da base do corte: é ela que despenca. Montada com y absoluto para o v
-  // da textura bater, e depois transladada.
-  function makePart(bi, yFrom) {
+  // A parte do prédio entre yFrom e yTo, idêntica à original (mesmas janelas, mesmo tom), com a
+  // origem no centro da base do corte: é ela que despenca (inteira, ou um segmento dela).
+  // Montada com y absoluto para o v da textura bater, e depois transladada. Onde o corte cai no
+  // meio de um nível, a parte ganha uma tampa de concreto quebrado: sem ela, um segmento solto
+  // seria uma casca oca.
+  function makePart(bi, yFrom, yTo = Infinity) {
     const r = refs[bi];
     const b = layout.buildings[bi];
     const gw = new GeoBuilder();
     const gr = new GeoBuilder();
     const gt = new GeoBuilder();
+    const gc = new GeoBuilder();
     gw.tint = r.tint;
     for (const t of r.tiers) {
-      if (t.y1 > yFrom) addTier(gw, gr, t.trim >= 0 ? gt : null, { ...t, y0: Math.max(t.y0, yFrom) }, r.uo, r.vo);
+      const y0 = Math.max(t.y0, yFrom);
+      const y1 = Math.min(t.y1, yTo);
+      if (y1 <= y0 + 0.01) continue;
+      const x0 = t.x - t.w / 2;
+      const x1 = t.x + t.w / 2;
+      const z0 = t.z - t.d / 2;
+      const z1 = t.z + t.d / 2;
+      addWalls(gw, x0, y0, z0, x1, y1, z1, r.uo, r.vo);
+      if (y1 >= t.y1 - 0.01) {
+        addTop(gr, x0, y1, z0, x1, z1, 10);
+        if (t.trim >= 0) addBox(gt, x0 - 0.6, y1 - 1.4, z0 - 0.6, x1 + 0.6, y1 + 0.9, z1 + 0.6, 4, false);
+      } else {
+        addBox(gc, x0 + 0.1, y1 - 0.5, z0 + 0.1, x1 - 0.1, y1, z1 - 0.1, 4, true);
+      }
+      if (y0 <= yFrom + 0.01) addBox(gc, x0 + 0.1, y0, z0 + 0.1, x1 - 0.1, y0 + 0.5, z1 - 0.1, 4, true);
     }
     const part = new THREE.Group();
     part.position.set(b.x, yFrom, b.z);
-    for (const [g, m] of [[gw, matByStyle[r.style]], [gr, roofMat], [gt, trimMat]]) {
+    for (const [g, m] of [[gw, matByStyle[r.style]], [gr, roofMat], [gt, trimMat], [gc, capMat]]) {
       if (!g.pos.length) continue;
       const geo = g.build();
       geo.translate(-b.x, -yFrom, -b.z);

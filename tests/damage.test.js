@@ -33,3 +33,10 @@ test('dano: prédio desabado não desaba de novo', () => {
   d.hit(4, 40, 20, 420);
   assert.equal(d.hit(4, 40, 20, 420), null);
 });
+
+test('dano: com força de supersônico (ou carregado) cai qualquer prédio, de uma vez', () => {
+  const d = createDamage();
+  assert.equal(d.hit(4, 50, 90, 420), 48); // 90 m de largura: a regra do dano sozinha não derrubaria
+  assert.equal(d.hit(5, 12, 90, 150 * 3), 8); // 150 m/s com a carga solar cheia (força 3×)
+  assert.equal(d.hit(6, 12, 90, 339), null);
+});

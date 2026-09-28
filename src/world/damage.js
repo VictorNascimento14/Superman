@@ -2,7 +2,9 @@
 // andar na altura em que passou: o rombo (~6 m) sobre a largura do prédio atravessada, e
 // mais quanto mais rápido. Quando a soma numa faixa de altura chega ao limite, tudo acima
 // dela desaba. Passadas em alturas diferentes não somam: é o mesmo andar que precisa ceder.
-export const DAMAGE = { hole: 6, band: 8, collapseAt: 0.5, speedRef: 200 };
+// Golpe com força de supersônico (a velocidade vezes a carga solar) derruba de uma vez, em
+// qualquer largura: escolha do jogador na fase 3.
+export const DAMAGE = { hole: 6, band: 8, collapseAt: 0.5, speedRef: 200, topple: 340 };
 
 export function createDamage() {
   const bands = new Map(); // prédio → Map(faixa → fração destruída)
@@ -18,7 +20,7 @@ export function createDamage() {
     const b = bands.get(building);
     const total = (b.get(band) ?? 0) + frac;
     b.set(band, total);
-    if (total < DAMAGE.collapseAt) return null;
+    if (total < DAMAGE.collapseAt && speed < DAMAGE.topple) return null;
     collapsed.add(building);
     return band * DAMAGE.band;
   }

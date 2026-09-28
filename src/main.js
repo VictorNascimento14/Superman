@@ -92,6 +92,7 @@ const breachFx = createBreachFx(world, openings);
 const interiors = createInteriors(world, layout, openings, city);
 const explosions = createExplosions(world);
 const blastAt = new THREE.Vector3();
+const cedeAt = new THREE.Vector3();
 let insideBi = -1; // o último prédio em que o herói entrou
 // Quebrar uma peça do interior: quantos pedaços e de que tamanho, por tipo.
 const SMASH_BITS = { column: [6, 0.8], core: [5, 1], wall: [4, 0.8], desk: [3, 0.6], cabinet: [3, 0.6], light: [2, 0.4] };
@@ -220,13 +221,15 @@ renderer.setAnimationLoop(() => {
       // Furou a fachada (entrada) ou saiu do outro lado: a saída espalha mais entulho. Ao entrar,
       // o prédio ganha o interior em volta de onde o herói passou, e os furos abrem de verdade.
       const bi = collision.boxes[e.box].building;
-      if (e.entry && bi !== undefined) {
+      // Primeiro o dano: prédio que vai desabar não precisa de interior (a parte de cima cai
+      // no mesmo quadro, e montar para já desmontar custava quadros no supersônico).
+      collapses.onBreach(e);
+      if (e.entry && bi !== undefined && !collapses.isCollapsed(bi)) {
         interiors.activate(bi, e.at.y);
         insideBi = bi;
       }
       const hole = breachFx.spawn(e);
       if (hole && interiors.isActive(bi)) openings.add(bi, hole);
-      collapses.onBreach(e);
       // Explosão: clarão, fogo e fumaça saindo da fachada, maiores quanto mais forte o golpe (a
       // carga solar conta); na saída, maior.
       const power = Math.min(1, (e.speed * (1 + SOLAR.force * solar.charge)) / 420);
@@ -267,6 +270,23 @@ renderer.setAnimationLoop(() => {
       audio.collapse(near);
       chase.shake(0.3 + 0.7 * near);
       hud.toast('DESABOU!', 1.5);
+    } else if (e.type === 'cede') {
+      // Os andares em volta do furo cederam: o interior dali cai (laje inclusive) e a fachada
+      // abre mais, num rombo de vários andares.
+      const ax = Math.abs(e.normal.x) > Math.abs(e.normal.z) ? Math.sign(e.normal.x) : 0;
+      const az = ax === 0 ? Math.sign(e.normal.z) : 0;
+      cedeAt.set(e.at.x - ax * e.radius * 0.5, e.at.y - 1, e.at.z - az * e.radius * 0.5);
+      const fallen = interiors.collapseRegion(e.building, cedeAt, e.radius);
+      for (let i = 0; i < Math.min(fallen.length, 30); i++) {
+        const c = fallen[i];
+        breachFx.burst((c.minX + c.maxX) / 2, (c.minY + c.maxY) / 2, (c.minZ + c.maxZ) / 2, ax * 2, -1, az * 2, 2, 1, c.kind === 'slab' ? 1.8 : 0.8, PIECE_COLOR[c.kind]);
+      }
+      if (interiors.isActive(e.building)) openings.add(e.building, { x: e.at.x, y: e.at.y - 1, z: e.at.z, nx: ax, ny: 0, nz: az, r: e.radius });
+      audio.impact(0.5 + 0.5 * near);
+      chase.shake(0.15 + 0.35 * near);
+    } else if (e.type === 'break') {
+      audio.collapse(near * 0.6); // o estalo da parte de cima se partindo
+      chase.shake(0.2 + 0.5 * near);
     } else audio.impact(0.4 + 0.6 * near);
   }
   collapses.events.length = 0;

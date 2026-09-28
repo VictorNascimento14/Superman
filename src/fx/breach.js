@@ -7,7 +7,7 @@ import { hideInstancesIn } from './instances.js';
 // e poeira. Tudo em pools de tamanho fixo — nada aloca por quadro.
 const HOLES = 160;
 const CHUNKS = 1200;
-const PUFFS = 160;
+const PUFFS = 480; // a nuvem de um desabamento grande usa muitas
 const PUFF_LIFE = 3.5;
 
 const Z = new THREE.Vector3(0, 0, 1);

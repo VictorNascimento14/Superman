@@ -112,10 +112,28 @@ try {
     setTimeout(() => {
       const tops = g.collision.boxes.filter((b) => b.building === shot.bi).map((b) => b.maxY);
       resolve({ collapsed: g.collapses.isCollapsed(shot.bi), active: g.collapses.active, top: Math.max(...tops) });
-    }, 8000);
+    }, 12000);
   }));
   console.log(`desabar: desabou ${fall.collapsed}, em andamento ${fall.active}, teto ${fall.top.toFixed(1)} m`);
   if (!fall.collapsed || fall.active || fall.top > 3.01) { console.error('Desabamento falhou.'); failed = true; }
+  // Supersônico derruba qualquer prédio, mesmo largo, e a parte de cima se parte em segmentos
+  // no ar; a 150 m/s, um prédio largo não cai, mas os andares em volta do furo cedem.
+  const wide = await page.evaluate(() => new Promise((resolve) => {
+    const g = window.__game;
+    const shot = window.__launch(Infinity, 420, 60);
+    setTimeout(() => resolve({ width: shot.width, collapsed: g.collapses.isCollapsed(shot.bi), segments: g.collapses.segments }), 1800);
+  }));
+  console.log(`derrubar largo: prédio de ${wide.width.toFixed(0)} m a 420 m/s desabou ${wide.collapsed}, ${wide.segments} segmentos caindo`);
+  if (!wide.collapsed || wide.segments < 2) { console.error('Derrubar prédio largo falhou.'); failed = true; }
+  const cede = await page.evaluate(() => new Promise((resolve) => {
+    const g = window.__game;
+    const before = g.collapses.ceded;
+    const shot = window.__launch(Infinity, 150, 60);
+    setTimeout(() => resolve({ width: shot.width, collapsed: g.collapses.isCollapsed(shot.bi), ceded: g.collapses.ceded - before }), 2000);
+  }));
+  await page.screenshot({ path: `${OUT}/ceder.png` });
+  console.log(`ceder: prédio de ${cede.width.toFixed(0)} m a 150 m/s desabou ${cede.collapsed}; andares cederam em ${cede.ceded} furos`);
+  if (cede.collapsed || cede.ceded < 1) { console.error('Ceder em volta do furo falhou.'); failed = true; }
   // Origem flutuante: a 5·10⁸ m da cidade, a câmera fica perto da origem de render (a GPU
   // trabalha em float32) e nada quebra.
   const far = await page.evaluate(() => new Promise((resolve) => {
