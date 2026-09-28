@@ -43,3 +43,26 @@ export function upAt(p, out) {
 export function speedCap(alt, floorSpeed) {
   return Math.max(floorSpeed, SPACE.cap * alt);
 }
+
+// Só a Terra: o voo usa isto até o sistema solar ser montado (e nos testes da cidade).
+// O piso dela (fora do mundo plano da cidade) é SPACE.floor.
+export const EARTH_ONLY = [{ name: 'TERRA', x: 0, y: -EARTH.radius, z: 0, radius: EARTH.radius, floor: SPACE.floor }];
+
+// Corpo com a superfície mais perto de p: grava o índice em out.i e a distância em out.d.
+// É ele que comanda a hipervelocidade, o teto e o piso — chegar a qualquer planeta é suave.
+export function nearestSurface(bodies, p, out) {
+  out.i = -1;
+  out.d = Infinity;
+  for (let i = 0; i < bodies.length; i++) {
+    const b = bodies[i];
+    const dx = p.x - b.x;
+    const dy = p.y - b.y;
+    const dz = p.z - b.z;
+    const d = Math.sqrt(dx * dx + dy * dy + dz * dz) - b.radius;
+    if (d < out.d) {
+      out.d = d;
+      out.i = i;
+    }
+  }
+  return out;
+}

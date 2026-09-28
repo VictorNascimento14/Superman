@@ -74,7 +74,7 @@ export function createSky(scene, renderer, preset, world = scene) {
 
   const sunDir = new THREE.Vector3();
   // Intensidades do horário; o espaço multiplica por cima (setSpace).
-  const base = { hemi: 1, env: 0.55, stars: 0 };
+  const base = { hemi: 1, env: 0.55, stars: 0, sunI: 1, sunColor: new THREE.Color() };
   let spaceK = 0;
   let lowK = 0;
   // 0 = chão, 1 = acima da atmosfera: o céu fica transparente e deixa ver a cena do espaço
@@ -98,6 +98,23 @@ export function createSky(scene, renderer, preset, world = scene) {
   // sunDir: a luz direcional da cidade (à noite vira lua, nunca abaixo de 18°); sunTrue: onde
   // o Sol está de verdade — é ele que ilumina o globo visto do espaço.
   const state = { name: 'dia', night: 0, exposure: 0.55, sunDir, sunTrue: u.sunPosition.value };
+  const cityDir = new THREE.Vector3(); // a luz da cidade no horário atual
+  const WHITE = new THREE.Color(1, 1, 1);
+  const SPACE_SUN = 3.2; // no vácuo, o Sol sem atmosfera no caminho
+
+  // No espaço, a luz vem do Sol de verdade visto do herói (`toSun`) e some na sombra de um
+  // corpo (`lit` de 0 a 1). k mistura da luz da cidade (0) para ela (1).
+  function setSunlight(toSun, k, lit) {
+    sunDir.copy(cityDir).lerp(toSun, k);
+    if (sunDir.lengthSq() < 1e-8) sunDir.copy(toSun);
+    sunDir.normalize();
+    lightRight.crossVectors(sun.shadow.camera.up, sunDir);
+    if (lightRight.lengthSq() < 1e-8) lightRight.set(1, 0, 0); // Sol a pino: qualquer eixo serve
+    lightRight.normalize();
+    lightUp.crossVectors(sunDir, lightRight);
+    sun.intensity = THREE.MathUtils.lerp(base.sunI, SPACE_SUN * lit, k);
+    sun.color.copy(base.sunColor).lerp(WHITE, k);
+  }
 
   function setTime(name) {
     const p = TIME_PRESETS[name];
@@ -113,11 +130,10 @@ export function createSky(scene, renderer, preset, world = scene) {
     u.rayleigh.value = p.rayleigh;
     u.showSunDisc.value = p.elevation > 0 ? 1 : 0;
     u.cloudCoverage.value = p.night > 0.9 ? 0.15 : 0.35;
-    sunDir.setFromSphericalCoords(1, THREE.MathUtils.degToRad(90 - lightElev), theta);
-    lightRight.crossVectors(sun.shadow.camera.up, sunDir).normalize();
-    lightUp.crossVectors(sunDir, lightRight);
-    sun.color.set(p.sun);
-    sun.intensity = p.sunI;
+    cityDir.setFromSphericalCoords(1, THREE.MathUtils.degToRad(90 - lightElev), theta);
+    base.sunI = p.sunI;
+    base.sunColor.set(p.sun);
+    setSunlight(cityDir, 0, 1);
     base.hemi = p.hemiI;
     hemi.color.set(p.night > 0.9 ? 0x4a5a8a : 0xbfd8ff);
     scene.fog.color.set(fogColorFor(p));
@@ -152,7 +168,7 @@ export function createSky(scene, renderer, preset, world = scene) {
   }
 
   setTime('dia');
-  return { setTime, setSpace, update, state, sun, hemi };
+  return { setTime, setSpace, setSunlight, update, state, sun, hemi };
 }
 
 function fogColorFor(p) {

@@ -1,19 +1,24 @@
 import * as THREE from 'three';
 import { createRng } from '../core/rng.js';
 import { EARTH } from './nav.js';
+import { CITY_GEO, toCity, SUN, SUN_I } from './bodies.js';
 import { HALF, CELL, QUAY, CITY } from '../world/layout.js';
 
-// Espaço: uma cena à parte, desenhada antes da cidade, com a Terra em escala real e as
+// Espaço: uma cena à parte, desenhada antes da cidade, com o sistema solar em escala real e as
 // estrelas. A câmera do espaço fica na origem com a orientação da câmera do jogo, e cada
 // corpo é posto relativo a ela. Longe demais, ele é trazido para dentro do frustum com o raio
 // reduzido na mesma proporção: o tamanho aparente não muda ("espaço escalado"). Assim um
-// buffer de profundidade comum serve de 1 m a 10¹² m.
-const PLACE = 1e5; // corpos além disto (m) são trazidos para esta distância, em escala
+// buffer de profundidade comum serve de 1 m a 10¹⁶ m.
+const PLACE = 1e5; // até esta distância (m) o corpo fica onde está
+const LOG_K = 2; // além dela, a distância cresce com o log: o mais longe continua atrás
+const STAR_R = PLACE * 16; // estrelas atrás de tudo
 const STARS = 6000;
-// Metrópolis no globo: 40,7° N, 74° O. O globo gira para esse ponto ficar no "para cima"
-// da cidade.
-const CITY_LAT = THREE.MathUtils.degToRad(40.7);
-const CITY_LON = THREE.MathUtils.degToRad(-74);
+const CORONA = 5; // raio da casca da coroa, em raios do Sol
+const MIN_PX = 0.9; // raio aparente mínimo (px): um planeta a bilhões de km ainda é um ponto
+
+// Distância no espaço escalado: igual até PLACE, depois logarítmica e presa antes das
+// estrelas. Preserva a ordem — é ela que decide quem passa na frente de quem.
+export const mapDist = (d) => (d <= PLACE ? d : Math.min(PLACE * (1 + Math.log(d / PLACE) / LOG_K), STAR_R * 0.9));
 
 const NOISE = /* glsl */ `
   // Hash aritmético (sem sin: barato em GPU integrada) e value noise 3D suave.
@@ -142,20 +147,155 @@ const ATMO_FRAG = /* glsl */ `
     gl_FragColor = vec4(vec3(0.3, 0.58, 1.0) * edge * (0.05 + 0.95 * day) * 1.3, 1.0);
   }`;
 
+// Sol: granulação que ferve devagar, manchas em latitudes médias e o limbo mais escuro e
+// mais vermelho. `glow` é o brilho HDR: alto quando ele é pequeno na tela (o bloom faz a
+// estrela), baixo quando é grande (a superfície aparece em vez de estourar a tela).
+const SUN_FRAG = /* glsl */ `
+  uniform float time;
+  uniform float detail;
+  uniform float glow;
+  varying vec3 vGeo;
+  varying vec3 vNormalW;
+  varying vec3 vPosW;
+  ${NOISE}
+  void main() {
+    vec3 n = normalize(vGeo);
+    float mu = max(dot(normalize(vNormalW), normalize(-vPosW)), 0.0);
+    float g = fbm(n * 26.0 + vec3(0.0, time * 0.015, 0.0), 4);
+    if (detail > 0.0) g = mix(g, 0.55 * g + 0.45 * noise(n * 420.0 + vec3(time * 0.06)), detail);
+    float band = smoothstep(0.1, 0.25, abs(n.y)) * (1.0 - smoothstep(0.45, 0.6, abs(n.y)));
+    float spots = smoothstep(0.74, 0.8, fbm(n * 6.0 + 11.0, 3)) * band;
+    float limb = 0.3 + 0.7 * pow(mu, 0.5);
+    // De longe, branco-amarelado; de perto, o laranja com as células bem marcadas.
+    vec3 hot = mix(vec3(1.0, 0.82, 0.55), vec3(1.0, 0.55, 0.16), detail);
+    vec3 col = mix(vec3(1.0, 0.3, 0.05), hot, limb) * limb;
+    col *= mix(0.7 + 0.6 * g, 0.25 + 1.5 * g * g, detail) * (1.0 - 0.85 * spots);
+    gl_FragColor = vec4(col * glow, 1.0);
+  }`;
+
+// Coroa: casca de faces de trás em volta do Sol. Cada pixel mede o quanto o raio de visão
+// passa perto do centro (em raios do Sol) e brilha mais quanto mais perto — funciona de
+// qualquer distância, até de dentro dela.
+const CORONA_FRAG = /* glsl */ `
+  uniform vec3 center;
+  uniform float radius;
+  uniform float strength;
+  varying vec3 vPosW;
+  void main() {
+    vec3 d = normalize(vPosW);
+    float t = max(dot(center, d), 0.0);
+    float b = max(length(center - d * t) / radius, 1.0);
+    float glow = 1.4 * pow(1.0 / b, 7.0) + 0.15 * pow(1.0 / b, 2.4);
+    glow *= 1.0 - smoothstep(0.55, 1.0, b / ${CORONA.toFixed(1)});
+    glow *= smoothstep(-0.2, 0.3, dot(d, normalize(center))); // de costas para o Sol, não
+    gl_FragColor = vec4(vec3(1.0, 0.6, 0.28) * glow * strength, 1.0);
+  }`;
+
+// Planetas e a Lua: um shader, quatro tipos (define KIND), cada um paga só o que usa.
+// look: x frequência das faixas · y turbulência (ou mares) · z semente · w mares só na face
+// voltada para a Terra (a Lua mostra sempre o mesmo lado).
+const BODY_FRAG = /* glsl */ `
+  uniform vec3 sunL;
+  uniform vec3 colA;
+  uniform vec3 colB;
+  uniform vec3 colC;
+  uniform vec4 look;
+  uniform vec4 spot; // direção local da mancha (xyz) e tamanho (w; 0 = sem mancha)
+  uniform float time;
+  varying vec3 vGeo;
+  varying vec3 vNormalW;
+  varying vec3 vPosW;
+  ${NOISE}
+  void main() {
+    vec3 n = normalize(vGeo);
+    vec3 nw = normalize(vNormalW);
+    float mu = max(dot(nw, normalize(-vPosW)), 0.0);
+    float ndl = dot(nw, sunL);
+    vec3 albedo;
+  #if KIND == 0
+    // Rochoso: terras altas claras e mares escuros, salpicados de crateras.
+    float h = fbm(n * 4.0 + look.z, 5);
+    float seas = smoothstep(0.5, 0.58, fbm(n * 1.5 + look.z * 2.0, 3)) * look.y;
+    if (look.w > 0.0) seas *= smoothstep(-0.3, 0.4, n.z);
+    float craters = smoothstep(0.8, 0.86, noise(n * 34.0 + look.z)) + 0.5 * smoothstep(0.82, 0.9, noise(n * 90.0));
+    albedo = mix(colA, colB, h) * (1.0 - 0.5 * seas) * (1.0 + 0.35 * craters);
+  #elif KIND == 1
+    // Vênus: nuvens espessas em faixas largas, quase sem contraste.
+    albedo = mix(colA, colB, fbm(vec3(n.x * 2.0, n.y * 7.0, n.z * 2.0) + look.z + vec3(time * 0.003, 0.0, 0.0), 4));
+  #elif KIND == 2
+    // Marte: poeira, planícies escuras e calotas polares.
+    float h = fbm(n * 2.6 + look.z, 5);
+    albedo = mix(colB, colA, smoothstep(0.35, 0.6, h)) * (1.0 - 0.4 * smoothstep(0.55, 0.65, fbm(n * 1.3 + 5.0, 3)));
+    albedo = mix(albedo, vec3(0.92, 0.9, 0.88), smoothstep(0.955, 0.97, abs(n.y) + 0.03 * (h - 0.5)));
+  #else
+    // Gigante gasoso: faixas de latitude torcidas pela turbulência, e uma mancha (a Grande
+    // Mancha Vermelha de Júpiter, a Mancha Escura de Netuno).
+    float lat = n.y + look.y * (fbm(n * vec3(3.0, 10.0, 3.0) + look.z + vec3(time * 0.002, 0.0, 0.0), 4) - 0.5);
+    albedo = mix(colA, colB, 0.5 + 0.5 * sin(lat * look.x));
+    albedo = mix(albedo, colC, 0.35 * (0.5 + 0.5 * sin(lat * look.x * 2.7 + 1.3)));
+    if (spot.w > 0.0) {
+      vec3 sd = n - spot.xyz;
+      albedo = mix(albedo, colC, (1.0 - smoothstep(0.6, 1.0, length(vec3(sd.x, sd.y * 1.8, sd.z)) / spot.w)) * 0.9);
+    }
+    albedo *= 0.7 + 0.3 * pow(mu, 0.4); // limbo mais escuro
+  #endif
+    // Abaixo de 1 no lado do dia: acima disso o bloom espalharia o planeta pela tela toda.
+    vec3 col = albedo * (0.004 + 0.85 * max(ndl, 0.0));
+  #if KIND != 0
+    col += colB * pow(1.0 - mu, 3.0) * smoothstep(-0.2, 0.4, ndl) * 0.35; // borda da atmosfera
+  #endif
+    gl_FragColor = vec4(col, 1.0);
+  }`;
+
+// Anéis de Saturno no plano do equador (xz local, em raios do planeta): anel C, anel B
+// brilhante, a divisão de Cassini e o anel A. O planeta faz sombra neles.
+const RING_VERT = /* glsl */ `
+  varying vec3 vLocal;
+  void main() {
+    vLocal = position;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }`;
+const RING_FRAG = /* glsl */ `
+  uniform vec3 sunLocal;
+  varying vec3 vLocal;
+  void main() {
+    float r = length(vLocal.xz);
+    float a = smoothstep(1.24, 1.3, r) * (1.0 - smoothstep(2.2, 2.27, r));
+    float b = smoothstep(1.52, 1.56, r) * (1.0 - smoothstep(1.92, 1.95, r));
+    float cassini = smoothstep(1.94, 1.96, r) * (1.0 - smoothstep(2.01, 2.03, r));
+    float dens = a * (0.3 + 0.6 * b) * (1.0 - 0.92 * cassini) * (0.85 + 0.15 * sin(r * 160.0));
+    float t = dot(vLocal, sunLocal);
+    float shadow = t < 0.0 ? smoothstep(0.97, 1.03, length(vLocal - sunLocal * t)) : 1.0;
+    gl_FragColor = vec4(vec3(0.86, 0.77, 0.58) * (0.02 + 0.95 * shadow), dens * 0.9);
+  }`;
+
+// Aparência de cada corpo (só render). Cores em sRGB; spot: [seno da latitude, longitude, tamanho].
+const LOOKS = {
+  LUA: { kind: 0, a: 0x5c5a57, b: 0x9d9b97, look: [0, 1, 3.1, 1] },
+  'MERCÚRIO': { kind: 0, a: 0x57504a, b: 0x9a9088, look: [0, 0.35, 7.7, 0] },
+  'VÊNUS': { kind: 1, a: 0xd2b77c, b: 0xf2e7c9, look: [0, 0, 2.3, 0] },
+  MARTE: { kind: 2, a: 0xc8703f, b: 0x7c3b22, look: [0, 0, 5.2, 0] },
+  'JÚPITER': { kind: 3, a: 0xe6d6b8, b: 0xa47a55, c: 0x9a4f30, look: [22, 0.18, 1.7, 0], spot: [-0.36, 0.9, 0.08] },
+  SATURNO: { kind: 3, a: 0xeadaa8, b: 0xc8ab76, c: 0xa88c5e, look: [26, 0.06, 4.4, 0], rings: true },
+  URANO: { kind: 3, a: 0xaee0e6, b: 0x96ced8, c: 0x86c0cc, look: [9, 0.03, 6.6, 0] },
+  NETUNO: { kind: 3, a: 0x4d76dc, b: 0x3558bb, c: 0x1f3584, look: [12, 0.1, 8.8, 0], spot: [-0.34, 2.4, 0.07] },
+};
+
 // park: a pegada do parque da cidade ({ x0, z0, x1, z1 }), para a ilha desenhada bater.
 export function createSpace({ park }) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x000000);
-  const camera = new THREE.PerspectiveCamera(62, 1, 1, PLACE * 20);
+  // O far cabe a casca da coroa vista de dentro (o centro do Sol + 5 raios, em escala); a
+  // precisão da profundidade quem decide é o near.
+  const camera = new THREE.PerspectiveCamera(62, 1, 10, PLACE * 60);
   const rel = new THREE.Vector3();
   const sunGeo = new THREE.Vector3();
+  const eye = new THREE.Vector3();
 
   // Globo: o ponto de Metrópolis gira para o "para cima" da cidade.
-  const cityGeo = new THREE.Vector3(Math.cos(CITY_LAT) * Math.cos(CITY_LON), Math.sin(CITY_LAT), -Math.cos(CITY_LAT) * Math.sin(CITY_LON));
-  const toCity = new THREE.Quaternion().setFromUnitVectors(cityGeo, new THREE.Vector3(0, 1, 0));
   const fromCity = toCity.clone().invert();
   const uniforms = {
-    sunGeo: { value: new THREE.Vector3() }, sunW: { value: new THREE.Vector3() }, cityGeo: { value: cityGeo }, time: { value: 0 }, detail: { value: 0 },
+    sunGeo: { value: new THREE.Vector3() }, sunW: { value: new THREE.Vector3() }, cityGeo: { value: CITY_GEO }, time: { value: 0 }, detail: { value: 0 },
     cityX: { value: new THREE.Vector3(1, 0, 0).applyQuaternion(fromCity) },
     cityZ: { value: new THREE.Vector3(0, 0, 1).applyQuaternion(fromCity) },
     park: { value: new THREE.Vector4(park.x0, park.z0, park.x1, park.z1) },
@@ -170,6 +310,43 @@ export function createSpace({ park }) {
   atmo.frustumCulled = false;
   scene.add(earth, atmo);
 
+  // Sol e coroa.
+  const sphere = new THREE.SphereGeometry(1, 128, 80);
+  const sunU = { time: uniforms.time, detail: { value: 0 }, glow: { value: 14 } };
+  const sun = new THREE.Mesh(sphere, new THREE.ShaderMaterial({ uniforms: sunU, vertexShader: EARTH_VERT, fragmentShader: SUN_FRAG }));
+  const coronaU = { center: { value: sun.position }, radius: { value: 1 }, strength: { value: 6 } };
+  const corona = new THREE.Mesh(new THREE.SphereGeometry(1, 48, 32), new THREE.ShaderMaterial({
+    uniforms: coronaU, vertexShader: EARTH_VERT, fragmentShader: CORONA_FRAG,
+    side: THREE.BackSide, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false,
+  }));
+  scene.add(sun, corona);
+
+  // Planetas e a Lua.
+  const lin = (hex) => new THREE.Color(hex ?? 0);
+  const meshes = {};
+  for (const [name, L] of Object.entries(LOOKS)) {
+    const spot = L.spot
+      ? new THREE.Vector4(Math.sqrt(1 - L.spot[0] ** 2) * Math.cos(L.spot[1]), L.spot[0], Math.sqrt(1 - L.spot[0] ** 2) * Math.sin(L.spot[1]), L.spot[2])
+      : new THREE.Vector4();
+    const mesh = new THREE.Mesh(sphere, new THREE.ShaderMaterial({
+      defines: { KIND: L.kind },
+      uniforms: {
+        sunL: { value: new THREE.Vector3() }, colA: { value: lin(L.a) }, colB: { value: lin(L.b) }, colC: { value: lin(L.c) },
+        look: { value: new THREE.Vector4(...L.look) }, spot: { value: spot }, time: uniforms.time,
+      },
+      vertexShader: EARTH_VERT, fragmentShader: BODY_FRAG,
+    }));
+    if (L.rings) {
+      const ringGeo = new THREE.RingGeometry(1.24, 2.27, 160, 1).rotateX(-Math.PI / 2);
+      mesh.add(new THREE.Mesh(ringGeo, new THREE.ShaderMaterial({
+        uniforms: { sunLocal: { value: new THREE.Vector3() } }, vertexShader: RING_VERT, fragmentShader: RING_FRAG,
+        side: THREE.DoubleSide, transparent: true, depthWrite: false,
+      })));
+    }
+    meshes[name] = mesh;
+    scene.add(mesh);
+  }
+
   // Estrelas no "infinito": presas à câmera do espaço, que só gira.
   const rng = createRng(1977);
   const pos = new Float32Array(STARS * 3);
@@ -178,8 +355,8 @@ export function createSpace({ park }) {
   for (let i = 0; i < STARS; i++) {
     const u = rng.range(-1, 1);
     const a = rng.range(0, Math.PI * 2);
-    const r = Math.sqrt(1 - u * u) * PLACE * 9;
-    pos.set([Math.cos(a) * r, u * PLACE * 9, Math.sin(a) * r], i * 3);
+    const r = Math.sqrt(1 - u * u) * STAR_R;
+    pos.set([Math.cos(a) * r, u * STAR_R, Math.sin(a) * r], i * 3);
     c.setHSL(rng.pick([0.08, 0.12, 0.6, 0.62, 0.0]), rng.range(0.1, 0.5), rng.range(0.55, 1)).multiplyScalar(rng.chance(0.03) ? 3 : 1);
     col.set([c.r, c.g, c.b], i * 3);
   }
@@ -190,31 +367,81 @@ export function createSpace({ park }) {
   stars.frustumCulled = false;
   scene.add(stars);
 
-  // Corpo em espaço escalado: longe, vem para PLACE com o raio reduzido na mesma razão.
-  function place(mesh, radius) {
-    const d = rel.length();
-    const s = d > PLACE ? PLACE / d : 1;
-    mesh.position.copy(rel).multiplyScalar(s);
-    mesh.scale.setScalar(radius * s);
+  // O sistema é estático: a orientação e a direção do Sol de cada corpo só mudam quando a hora
+  // muda (e o sistema gira em volta da Terra).
+  let bodies = [];
+  const basis = new THREE.Matrix4();
+  const bx = new THREE.Vector3();
+  const by = new THREE.Vector3();
+  const bz = new THREE.Vector3();
+  const qInv = new THREE.Quaternion();
+  function setBodies(list) {
+    bodies = list;
+    const s = list[SUN_I];
+    const e = list[0];
+    uniforms.sunW.value.set(s.x - e.x, s.y - e.y, s.z - e.z).normalize();
+    uniforms.sunGeo.value.copy(sunGeo.copy(uniforms.sunW.value).applyQuaternion(fromCity));
+    for (const b of list) {
+      const mesh = meshes[b.name];
+      if (!mesh) continue;
+      by.set(b.axis.x, b.axis.y, b.axis.z);
+      if (b.name === 'LUA') {
+        // A Lua mostra sempre a mesma face (+z local, onde ficam os mares) para a Terra.
+        bz.set(e.x - b.x, e.y - b.y, e.z - b.z).normalize();
+        bz.addScaledVector(by, -bz.dot(by)).normalize();
+        bx.crossVectors(by, bz);
+        mesh.quaternion.setFromRotationMatrix(basis.makeBasis(bx, by, bz));
+      } else {
+        mesh.quaternion.setFromUnitVectors(bx.set(0, 1, 0), by);
+      }
+      const sunL = mesh.material.uniforms.sunL.value.set(s.x - b.x, s.y - b.y, s.z - b.z).normalize();
+      const ring = mesh.children[0];
+      if (ring) ring.material.uniforms.sunLocal.value.copy(sunL).applyQuaternion(qInv.copy(mesh.quaternion).invert());
+    }
   }
 
-  // `view`: a câmera do jogo; `eye`: a posição verdadeira dela (referencial da cidade).
-  function update(view, eye, sunDir, time) {
+  // Corpo em espaço escalado (mapDist), nunca menor que MIN_PX. Devolve a distância real.
+  function place(mesh, b, radius, pixel) {
+    rel.set(b.x - eye.x, b.y - eye.y, b.z - eye.z);
+    const d = rel.length();
+    const s = mapDist(d) / d;
+    mesh.position.copy(rel).multiplyScalar(s);
+    mesh.scale.setScalar(Math.max(radius, d * pixel * MIN_PX) * s);
+    return d;
+  }
+
+  // `view`: a câmera do jogo; `at`: a posição verdadeira dela (referencial da cidade);
+  // `pixel`: o ângulo de um pixel (rad).
+  function update(view, at, time, pixel) {
     view.getWorldQuaternion(camera.quaternion);
     if (camera.fov !== view.fov || camera.aspect !== view.aspect) {
       camera.fov = view.fov;
       camera.aspect = view.aspect;
       camera.updateProjectionMatrix();
     }
-    rel.set(-eye.x, -EARTH.radius - eye.y, -eye.z); // centro da Terra em (0, −R, 0)
-    place(earth, EARTH.radius);
-    place(atmo, EARTH.radius * 1.025);
-    uniforms.sunW.value.copy(sunDir);
-    uniforms.sunGeo.value.copy(sunGeo.copy(sunDir).applyQuaternion(fromCity));
+    eye.copy(at);
     uniforms.time.value = time;
+    const e = bodies[0];
+    const de = place(earth, e, EARTH.radius, pixel);
+    atmo.position.copy(earth.position);
+    atmo.scale.copy(earth.scale).multiplyScalar(1.025);
     // Detalhe fino abaixo de ~4.000 km de altitude (antes disso ele só serrilharia).
-    uniforms.detail.value = 1 - THREE.MathUtils.smoothstep(rel.length() - EARTH.radius, 4e5, 4e6);
+    uniforms.detail.value = 1 - THREE.MathUtils.smoothstep(de - EARTH.radius, 4e5, 4e6);
+    const ds = place(sun, bodies[SUN_I], SUN.radius, pixel);
+    corona.position.copy(sun.position);
+    corona.scale.copy(sun.scale).multiplyScalar(CORONA);
+    coronaU.radius.value = sun.scale.x;
+    // Quanto maior o Sol na tela, menos brilho por pixel (como o olho se ajusta): de longe, uma
+    // estrela que o bloom espalha; de perto, a superfície com a granulação.
+    const big = THREE.MathUtils.smoothstep(Math.asin(Math.min(1, SUN.radius / ds)), 0.02, 0.3);
+    sunU.detail.value = big;
+    sunU.glow.value = 14 * Math.pow(1.8 / 14, big);
+    coronaU.strength.value = THREE.MathUtils.lerp(4, 0.5, big);
+    for (let i = 0; i < bodies.length; i++) {
+      const mesh = meshes[bodies[i].name];
+      if (mesh) place(mesh, bodies[i], bodies[i].radius, pixel);
+    }
   }
 
-  return { scene, camera, update, earth };
+  return { scene, camera, update, setBodies, earth, sun, meshes };
 }

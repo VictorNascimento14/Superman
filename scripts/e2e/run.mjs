@@ -134,10 +134,49 @@ try {
   }));
   console.log(`espaço: subiu a ${Math.round(up / 1000)} km em 8 s; desceu a ${Math.round(down)} m em 15 s`);
   if (up < 1e6 || down > 5000) { console.error('Ida e volta ao espaço falhou.'); failed = true; }
+  // Sistema solar: de 20.000 km, mirando o Sol com boost, chega a menos de 100.000 km da
+  // superfície dele (a velocidade acompanha a distância do corpo mais perto).
+  const trip = await page.evaluate(() => new Promise((resolve) => {
+    const g = window.__game;
+    const sun = g.flight.bodies[1];
+    g.flight.mode = 'air';
+    g.flight.vel.set(0, 0, 0);
+    g.flight.pos.set(0, 2e7, 0);
+    const dx = sun.x - g.flight.pos.x;
+    const dy = sun.y - g.flight.pos.y;
+    const dz = sun.z - g.flight.pos.z;
+    g.flight.yaw = Math.atan2(dx, dz);
+    g.flight.pitch = Math.asin(dy / Math.hypot(dx, dy, dz));
+    g.autopilot({ forward: 1, boost: true });
+    const t0 = performance.now();
+    const check = setInterval(() => {
+      const near = g.flight.nearest;
+      const s = (performance.now() - t0) / 1000;
+      if ((near.i === 1 && near.d < 1e8) || s > 45) {
+        clearInterval(check);
+        g.autopilot({});
+        resolve({ s, body: g.flight.bodies[near.i].name, d: near.d });
+      }
+    }, 100);
+  }));
+  await page.screenshot({ path: `${OUT}/sol.png` });
+  console.log(`sistema solar: ${trip.body} a ${Math.round(trip.d / 1000)} km da superfície em ${trip.s.toFixed(1)} s`);
+  if (trip.body !== 'SOL' || trip.d > 1e8) { console.error('Viagem ao Sol falhou.'); failed = true; }
+  // Saturno de perto: os anéis e o planeta desenhados sem erro.
+  await page.evaluate(() => new Promise((resolve) => {
+    const g = window.__game;
+    const b = g.flight.bodies.find((x) => x.name === 'SATURNO');
+    g.flight.vel.set(0, 0, 0);
+    g.flight.pos.set(b.x - 3.6e8, b.y, b.z);
+    g.flight.yaw = Math.PI / 2;
+    g.flight.pitch = 0;
+    setTimeout(resolve, 1500);
+  }));
+  await page.screenshot({ path: `${OUT}/saturno.png` });
   if (errors.length) { console.error('Erros no console:\n' + errors.join('\n')); failed = true; }
   const missing = Object.entries(state?.doneBy ?? { aneis: 0, resgate: 0, drones: 0 }).filter(([, n]) => !n).map(([k]) => k);
   if (missing.length) { console.error(`Sem vitória em ${LIMIT_S} s: ${missing.join(', ')}.`); failed = true; }
-  if (!failed) console.log(`OK — anéis, resgate e drones cumpridos (${state.score} pontos); prédio atravessado e derrubado. Screenshots em ${OUT}/.`);
+  if (!failed) console.log(`OK — anéis, resgate e drones cumpridos (${state.score} pontos); prédio atravessado e derrubado; espaço e Sol. Screenshots em ${OUT}/.`);
 } finally {
   await browser.close();
   await new Promise((r) => server.httpServer.close(r));
