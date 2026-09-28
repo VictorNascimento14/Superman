@@ -4,9 +4,9 @@ import { Sky } from 'three/addons/objects/Sky.js';
 // Horários do dia. elevação/azimute do sol em graus; `night` liga janelas e estrelas.
 export const TIME_PRESETS = {
   amanhecer: { elevation: 5, azimuth: 95, sun: 0xffc38a, sunI: 2.6, hemiI: 0.5, turbidity: 6, rayleigh: 2.5, exposure: 0.75, night: 0.35 },
-  dia: { elevation: 48, azimuth: 150, sun: 0xfff1dc, sunI: 3.2, hemiI: 0.6, turbidity: 2.5, rayleigh: 1.0, exposure: 0.62, night: 0 },
+  dia: { elevation: 48, azimuth: 150, sun: 0xfff1dc, sunI: 2.8, hemiI: 0.5, turbidity: 2.5, rayleigh: 1.0, exposure: 0.5, night: 0 },
   entardecer: { elevation: 6, azimuth: 250, sun: 0xff9a5c, sunI: 2.8, hemiI: 0.45, turbidity: 8, rayleigh: 3, exposure: 0.72, night: 0.45 },
-  noite: { elevation: -2.5, azimuth: 200, sun: 0x9fb4ff, sunI: 0.9, hemiI: 0.45, turbidity: 1.5, rayleigh: 0.35, exposure: 1.1, night: 1 },
+  noite: { elevation: -2.5, azimuth: 200, sun: 0x9fb4ff, sunI: 0.9, hemiI: 1.1, turbidity: 1.5, rayleigh: 0.35, exposure: 1.1, night: 1 },
 };
 export const TIME_ORDER = ['amanhecer', 'dia', 'entardecer', 'noite'];
 
@@ -53,7 +53,7 @@ export function createSky(scene, renderer, preset) {
   sun.shadow.normalBias = 0.6;
   scene.add(sun, sun.target);
 
-  scene.fog = new THREE.Fog(0xb8c8dc, 450, preset.viewDistance);
+  scene.fog = new THREE.Fog(0xb8c8dc, 700, preset.viewDistance * 1.2);
 
   const stars = makeStars();
   scene.add(stars);
@@ -81,7 +81,7 @@ export function createSky(scene, renderer, preset) {
     hemi.intensity = p.hemiI;
     hemi.color.set(p.night > 0.9 ? 0x4a5a8a : 0xbfd8ff);
     scene.fog.color.set(fogColorFor(p));
-    stars.material.opacity = Math.max(0, p.night - 0.3) / 0.7;
+    stars.material.opacity = Math.max(0, p.night - 0.6) / 0.4;
     stars.visible = stars.material.opacity > 0;
     const isNight = p.elevation < 0;
     sky.visible = envSky.visible = !isNight;
@@ -90,7 +90,7 @@ export function createSky(scene, renderer, preset) {
     envRT?.dispose();
     envRT = pmrem.fromScene(envScene, 0, 1, 5000);
     scene.environment = envRT.texture;
-    scene.environmentIntensity = p.night > 0.9 ? 0.25 : 0.8;
+    scene.environmentIntensity = p.night > 0.9 ? 0.25 : 0.55;
   }
 
   function update(dt, focus, time) {
@@ -113,7 +113,7 @@ export function createSky(scene, renderer, preset) {
 function fogColorFor(p) {
   if (p.night > 0.9) return 0x1a2746;
   if (p.night > 0.3) return p.azimuth > 180 ? 0xd79a7a : 0xd8b8a0;
-  return 0xa9bfd8;
+  return 0x9fb6cf;
 }
 
 function makeNightDome() {
