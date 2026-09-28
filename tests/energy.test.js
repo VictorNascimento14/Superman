@@ -16,6 +16,13 @@ test('disparar drena; esvaziar trava até juntar o mínimo', () => {
   assert.ok(e.firing);
 });
 
+test('com a carga solar, disparar não drena a reserva', () => {
+  const e = createEnergy();
+  for (let t = 0; t < 5; t += 1 / 60) e.update(1 / 60, true, 0);
+  assert.equal(e.value, 1);
+  assert.ok(e.firing);
+});
+
 test('recarga só começa depois da pausa', () => {
   const e = createEnergy();
   run(e, true, 1);

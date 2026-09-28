@@ -51,14 +51,17 @@ try {
   // batendo nela (a 40 m o ponto já cai no quarteirão vizinho).
   await page.evaluate(() => {
     window.__autopilotStop();
-    window.__launch = (maxWidth, speed, skip = -1) => {
+    // Prédio intacto (sem desabar e sem dano na altura do voo), com a largura atravessada
+    // entre minWidth e maxWidth.
+    window.__launch = (maxWidth, speed, minWidth = 0) => {
       const g = window.__game;
       const hit = {};
       for (const [bi, b] of g.layout.buildings.entries()) {
-        if (b.landmark || bi === skip || b.h < 60) continue;
+        if (b.landmark || b.h < 60 || g.collapses.isCollapsed(bi) || g.collapses.damageAt(bi, 30) > 0) continue;
         const t = b.tiers[0];
         for (const [nx, nz, yaw] of [[0, -1, 0], [0, 1, Math.PI], [-1, 0, Math.PI / 2], [1, 0, -Math.PI / 2]]) {
-          if ((nx ? t.d : t.w) > maxWidth) continue;
+          const width = nx ? t.d : t.w;
+          if (width > maxWidth || width < minWidth) continue;
           const start = nx ? { x: t.x + nx * (t.w / 2 + 12), y: 30, z: t.z } : { x: t.x, y: 30, z: t.z + nz * (t.d / 2 + 12) };
           if (g.collision.heightAt(start.x, start.z) > 0.01) continue;
           if (!g.collision.raycast(start, { x: -nx, y: 0, z: -nz }, 20, hit) || g.collision.boxes[hit.box].building !== bi) continue;
@@ -70,7 +73,7 @@ try {
           g.autopilot({ forward: 1, boost: speed > 150 });
           // "Do outro lado": além da face oposta, na direção do voo.
           const far = nx ? t.x - nx * t.w / 2 : t.z - nz * t.d / 2;
-          return { bi, passed: () => (nx ? (far - g.flight.pos.x) * nx : (far - g.flight.pos.z) * nz) > 0 };
+          return { bi, width, passed: () => (nx ? (far - g.flight.pos.x) * nx : (far - g.flight.pos.z) * nz) > 0 };
         }
       }
       return null;
@@ -91,14 +94,14 @@ try {
   if (smash.breaches < 2 || smash.debris < 10 || !smash.passed) { console.error('Atravessar prédio falhou.'); failed = true; }
   // Desabar: supersônico num prédio estreito, uma passada basta; a parte de cima cai e sobra
   // o toco (teto da colisão na altura dos escombros).
-  const fall = await page.evaluate((skip) => new Promise((resolve) => {
+  const fall = await page.evaluate(() => new Promise((resolve) => {
     const g = window.__game;
-    const shot = window.__launch(34, 420, skip);
+    const shot = window.__launch(34, 420);
     setTimeout(() => {
       const tops = g.collision.boxes.filter((b) => b.building === shot.bi).map((b) => b.maxY);
       resolve({ collapsed: g.collapses.isCollapsed(shot.bi), active: g.collapses.active, top: Math.max(...tops) });
     }, 8000);
-  }), smash.bi);
+  }));
   console.log(`desabar: desabou ${fall.collapsed}, em andamento ${fall.active}, teto ${fall.top.toFixed(1)} m`);
   if (!fall.collapsed || fall.active || fall.top > 3.01) { console.error('Desabamento falhou.'); failed = true; }
   // Origem flutuante: a 5·10⁸ m da cidade, a câmera fica perto da origem de render (a GPU
@@ -173,10 +176,36 @@ try {
     setTimeout(resolve, 1500);
   }));
   await page.screenshot({ path: `${OUT}/saturno.png` });
+  // Carga solar: rente ao Sol ela enche; de volta à cidade continua cheia, e a 150 m/s um
+  // prédio de 24–34 m cai de uma vez — sem carga, esse golpe só o furaria (dano < 0,5).
+  const charge = await page.evaluate(() => new Promise((resolve) => {
+    const g = window.__game;
+    const sun = g.flight.bodies[1];
+    const d = sun.radius + 8e7;
+    g.flight.vel.set(0, 0, 0);
+    g.flight.pos.set(sun.x, sun.y + d, sun.z);
+    g.flight.pitch = -1.2;
+    const t0 = performance.now();
+    const check = setInterval(() => {
+      const s = (performance.now() - t0) / 1000;
+      if (g.solar.charge >= 1 || s > 20) { clearInterval(check); resolve({ s, charge: g.solar.charge }); }
+    }, 100);
+  }));
+  await page.screenshot({ path: `${OUT}/carga.png` });
+  const charged = await page.evaluate(() => new Promise((resolve) => {
+    const g = window.__game;
+    const before = g.solar.charge;
+    const shot = window.__launch(34, 150, 24);
+    setTimeout(() => resolve({ before, bi: shot.bi, width: shot.width, collapsed: g.collapses.isCollapsed(shot.bi) }), 8000);
+  }));
+  await page.screenshot({ path: `${OUT}/carga-desabar.png` });
+  const plain = (6 / charged.width) * (1 + 150 / 200);
+  console.log(`carga solar: cheia em ${charge.s.toFixed(1)} s rente ao Sol; na cidade ${Math.round(charged.before * 100)}%, a 150 m/s derrubou o prédio de ${charged.width.toFixed(0)} m: ${charged.collapsed} (sem carga, dano ${plain.toFixed(2)})`);
+  if (charge.charge < 1 || charged.before < 0.9 || !charged.collapsed) { console.error('Carga solar falhou.'); failed = true; }
   if (errors.length) { console.error('Erros no console:\n' + errors.join('\n')); failed = true; }
   const missing = Object.entries(state?.doneBy ?? { aneis: 0, resgate: 0, drones: 0 }).filter(([, n]) => !n).map(([k]) => k);
   if (missing.length) { console.error(`Sem vitória em ${LIMIT_S} s: ${missing.join(', ')}.`); failed = true; }
-  if (!failed) console.log(`OK — anéis, resgate e drones cumpridos (${state.score} pontos); prédio atravessado e derrubado; espaço e Sol. Screenshots em ${OUT}/.`);
+  if (!failed) console.log(`OK — anéis, resgate e drones cumpridos (${state.score} pontos); prédio atravessado e derrubado; espaço, Sol e carga solar. Screenshots em ${OUT}/.`);
 } finally {
   await browser.close();
   await new Promise((r) => server.httpServer.close(r));

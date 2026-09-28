@@ -21,6 +21,7 @@ import { createCollapses } from './world/collapse.js';
 import { createOverlay } from './ui/overlay.js';
 import { createHud } from './ui/hud.js';
 import { createHeatVision } from './powers/heatvision.js';
+import { createSolar, solarFlux } from './powers/solar.js';
 import { createMissions } from './game/missions.js';
 import { createAudio } from './audio/audio.js';
 
@@ -84,6 +85,7 @@ const hero = createHero(world);
 const shockwaves = createShockwaves(world);
 const breachFx = createBreachFx(world);
 const heatVision = createHeatVision(world, hero, collision, camera);
+const solar = createSolar();
 const collapses = createCollapses({
   scene: world, city, layout, collision, fx: breachFx,
   clearMarks: (box) => { breachFx.clearMarks(box); heatVision.clearMarks(box); },
@@ -264,8 +266,21 @@ renderer.setAnimationLoop(() => {
   // No espaço a luz do herói é o Sol de verdade, visto de onde ele está — e some na sombra da
   // Terra (ou de qualquer corpo entre ele e o Sol).
   const sun = bodies[SUN_I];
-  toSun.set(sun.x - flight.pos.x, sun.y - flight.pos.y, sun.z - flight.pos.z).normalize();
-  sky.setSunlight(toSun, spaceK, spaceK > 0 ? sunlight(bodies, flight.pos) : 1);
+  toSun.set(sun.x - flight.pos.x, sun.y - flight.pos.y, sun.z - flight.pos.z);
+  const sunDist = toSun.length();
+  toSun.divideScalar(sunDist);
+  const lit = spaceK > 0 ? sunlight(bodies, flight.pos) : 1;
+  sky.setSunlight(toSun, spaceK, lit);
+  // Carga solar: enche perto do Sol e cai devagar longe dele (vale a partir do próximo quadro).
+  if (!paused || debug.autopilot) {
+    const ev = solar.update(dt, solarFlux(sunDist, lit), heatVision.firing);
+    if (ev === 'full') hud.toast('CARGA SOLAR MÁXIMA', 2.5);
+    else if (ev === 'empty') hud.toast('CARGA SOLAR ESGOTADA', 1.5);
+  }
+  flight.charge = solar.charge;
+  heatVision.setCharge(solar.charge);
+  hero.setCharge(solar.charge, elapsed);
+  hud.setSolar(solar.charge);
   audio.update(paused ? 0 : flight.speed * (1 - spaceK), nearCity(flight.pos) ? flight.pos.y - groundY : flight.altitude, heatVision.firing, heatVision.hitting);
   sky.update(dt, flight.pos, elapsed);
   city.update(dt, elapsed, sky.state.night);
@@ -299,6 +314,7 @@ window.__game = {
   start,
   hud,
   heatVision,
+  solar,
   missions,
   destruction: breachFx,
   collapses,

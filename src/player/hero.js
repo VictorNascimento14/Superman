@@ -40,6 +40,22 @@ function joint(parent, x, y, z) {
 
 // Emblema estilizado: escudo pentagonal com um traço abstrato — de propósito NÃO é o
 // logotipo oficial (ADR-002).
+// Halo da carga solar: disco radial, dourado no centro e transparente na borda.
+function haloTexture() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const g = c.getContext('2d');
+  const grad = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  grad.addColorStop(0, 'rgba(255,236,190,0.9)');
+  grad.addColorStop(0.35, 'rgba(255,190,80,0.35)');
+  grad.addColorStop(1, 'rgba(255,140,30,0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 128, 128);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
 function emblemTexture() {
   const c = document.createElement('canvas');
   c.width = c.height = 256;
@@ -266,6 +282,35 @@ export function createHero(scene) {
   const cape = createCape(rig, m.red);
   scene.add(cape.mesh);
 
+  // Carga solar: a silhueta do corpo (e da capa) irradia dourado — um brilho de borda
+  // (fresnel) no emissivo, que o bloom espalha — dentro de um halo. De borda, e não uniforme:
+  // emissivo por igual desbotava o traje de dia. Com carga zero, nada muda.
+  const rim = { value: 0 };
+  const mats = Object.values(m);
+  for (const mat of mats) {
+    mat.onBeforeCompile = (shader) => {
+      shader.uniforms.uRim = rim;
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', '#include <common>\nuniform float uRim;')
+        .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+          totalEmissiveRadiance += vec3(1.0, 0.64, 0.2) * uRim * (0.05 + 2.6 * pow(1.0 - saturate(dot(normal, normalize(vViewPosition))), 4.0));`);
+    };
+  }
+  const halo = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: haloTexture(), color: new THREE.Color(1.6, 1.1, 0.45), blending: THREE.AdditiveBlending,
+    transparent: true, opacity: 0, depthWrite: false, fog: false,
+  }));
+  halo.position.y = 0.35;
+  halo.visible = false;
+  rig.root.add(halo);
+  function setCharge(k, t) {
+    const pulse = 1 + 0.08 * Math.sin(t * 5);
+    rim.value = k * pulse;
+    halo.visible = k > 0.01;
+    halo.material.opacity = k * 0.4;
+    halo.scale.setScalar(3.4 * pulse);
+  }
+
   return {
     root: rig.root,
     rig,
@@ -278,6 +323,7 @@ export function createHero(scene) {
       cape.update(dt, state.velocity, state.t);
     },
     resetCape: () => cape.reset(),
+    setCharge,
   };
 }
 

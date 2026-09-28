@@ -34,7 +34,7 @@ export function createCollapses({ scene, city, layout, collision, fx, clearMarks
     if (bi === undefined || layout.buildings[bi].landmark) return;
     // Largura atravessada: a extensão do nível perpendicular ao caminho, na horizontal.
     const width = Math.abs(e.dir.x) > Math.abs(e.dir.z) ? box.maxZ - box.minZ : box.maxX - box.minX;
-    const cut = damage.hit(bi, e.at.y, width, e.speed);
+    const cut = damage.hit(bi, e.at.y, width, e.force ?? e.speed); // força: com a carga solar, maior
     if (cut !== null) start(bi, Math.max(cut, RUBBLE));
   }
 
@@ -146,6 +146,7 @@ export function createCollapses({ scene, city, layout, collision, fx, clearMarks
     update,
     events,
     isCollapsed: damage.isCollapsed,
+    damageAt: damage.at,
     get active() { return active.length; },
   };
 }
