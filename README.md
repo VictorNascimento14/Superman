@@ -11,6 +11,13 @@ e texturas, sem nenhum asset binário baixado de terceiros.
 > pertencem aos seus donos; nenhum direito sobre eles é reivindicado. O código
 > deste repositório é original, e a licença (MIT) cobre só ele.
 
+## Jogar
+
+**https://victornascimento14.github.io/Superman/** — publicado a cada merge na `main`.
+
+Clique para voar · mouse olha · W A S D voa · Espaço sobe · C desce · Shift acelera
+(segure para supervelocidade) · T troca a hora do dia · Esc pausa.
+
 ## Rodar
 
 Requer Node.js 20.19+ ou 22.12+ e um navegador com WebGL2.
