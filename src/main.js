@@ -14,6 +14,7 @@ import { createChaseCamera } from './player/camera.js';
 import { createInput } from './core/input.js';
 import { createShockwaves } from './fx/shockwave.js';
 import { createBreachFx } from './fx/breach.js';
+import { createCollapses } from './world/collapse.js';
 import { createOverlay } from './ui/overlay.js';
 import { createHud } from './ui/hud.js';
 import { createHeatVision } from './powers/heatvision.js';
@@ -39,6 +40,10 @@ const hero = createHero(scene);
 const shockwaves = createShockwaves(scene);
 const breachFx = createBreachFx(scene);
 const heatVision = createHeatVision(scene, hero, collision, camera);
+const collapses = createCollapses({
+  scene, city, layout, collision, fx: breachFx,
+  clearMarks: (box) => { breachFx.clearMarks(box); heatVision.clearMarks(box); },
+});
 
 // Nasce na sacada do terceiro recuo do Planeta Diário, olhando para o centro.
 const planet = layout.buildings.find((b) => b.landmark);
@@ -134,6 +139,7 @@ renderer.setAnimationLoop(() => {
     } else if (e.type === 'breach') {
       // Furou a fachada (entrada) ou saiu do outro lado: a saída espalha mais entulho.
       breachFx.spawn(e);
+      collapses.onBreach(e);
       chase.shake(Math.min(1, e.speed / (e.entry ? 160 : 240)));
       audio.breach(Math.min(1, e.speed / 200), e.entry);
     } else if (e.type === 'impact') {
@@ -144,6 +150,17 @@ renderer.setAnimationLoop(() => {
   }
   flight.events.length = 0;
   for (const e of missions.events) audio[e.type]?.();
+  collapses.update(dt);
+  for (const e of collapses.events) {
+    // Mais perto, mais tremor: o ronco de um prédio inteiro caindo se sente de longe.
+    const near = Math.max(0, 1 - e.at.distanceTo(flight.pos) / 700);
+    if (e.type === 'collapse') {
+      audio.collapse(near);
+      chase.shake(0.3 + 0.7 * near);
+      hud.toast('DESABOU!', 1.5);
+    } else audio.impact(0.4 + 0.6 * near);
+  }
+  collapses.events.length = 0;
   missions.events.length = 0;
 
   hero.root.position.copy(flight.pos);
@@ -192,6 +209,7 @@ window.__game = {
   heatVision,
   missions,
   destruction: breachFx,
+  collapses,
   audio,
   heat: (on) => { debug.heat = on; },
   autopilot: (m) => { debug.autopilot = m ? { forward: 0, right: 0, up: 0, boost: false, jump: false, ...m } : null; },

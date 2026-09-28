@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { hideInstancesIn } from '../fx/instances.js';
 import { createEnergy, raySphere } from './energy.js';
 
 const RANGE = 700;
@@ -169,7 +170,12 @@ export function createHeatVision(scene, hero, collision, camera) {
     }
   }
 
-  return { update, energy, targets, get firing() { return energy.firing; }, get hitting() { return hitting; } };
+  return {
+    update, energy, targets,
+    clearMarks: (box) => hideInstancesIn(scorch, box), // prédio desabou: marca não fica no ar
+    get firing() { return energy.firing; },
+    get hitting() { return hitting; },
+  };
 }
 
 function radialTexture(inner, outer) {

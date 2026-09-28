@@ -47,38 +47,64 @@ try {
     // Três vitórias de qualquer tipo não bastam: um resgate quebrado passaria com anéis de novo.
     if (aneis && resgate && drones) break;
   }
-  // Atravessar prédio: da rua, a 150 m/s contra a fachada, o herói fura, sai do outro lado e
-  // deixa entrada, saída e entulho.
+  // Cenários de destruição. O alvo: uma face de prédio com rua livre a 12 m e o raio de volta
+  // batendo nela (a 40 m o ponto já cai no quarteirão vizinho).
+  await page.evaluate(() => {
+    window.__autopilotStop();
+    window.__launch = (maxWidth, speed, skip = -1) => {
+      const g = window.__game;
+      const hit = {};
+      for (const [bi, b] of g.layout.buildings.entries()) {
+        if (b.landmark || bi === skip || b.h < 60) continue;
+        const t = b.tiers[0];
+        for (const [nx, nz, yaw] of [[0, -1, 0], [0, 1, Math.PI], [-1, 0, Math.PI / 2], [1, 0, -Math.PI / 2]]) {
+          if ((nx ? t.d : t.w) > maxWidth) continue;
+          const start = nx ? { x: t.x + nx * (t.w / 2 + 12), y: 30, z: t.z } : { x: t.x, y: 30, z: t.z + nz * (t.d / 2 + 12) };
+          if (g.collision.heightAt(start.x, start.z) > 0.01) continue;
+          if (!g.collision.raycast(start, { x: -nx, y: 0, z: -nz }, 20, hit) || g.collision.boxes[hit.box].building !== bi) continue;
+          g.flight.mode = 'air';
+          g.flight.pos.set(start.x, start.y, start.z);
+          g.flight.yaw = yaw;
+          g.flight.pitch = 0;
+          g.flight.vel.set(-nx * speed, 0, -nz * speed);
+          g.autopilot({ forward: 1, boost: speed > 150 });
+          // "Do outro lado": além da face oposta, na direção do voo.
+          const far = nx ? t.x - nx * t.w / 2 : t.z - nz * t.d / 2;
+          return { bi, passed: () => (nx ? (far - g.flight.pos.x) * nx : (far - g.flight.pos.z) * nz) > 0 };
+        }
+      }
+      return null;
+    };
+  });
+  // Atravessar: a 150 m/s contra a fachada, o herói fura, sai do outro lado e deixa entrada,
+  // saída e entulho.
   const smash = await page.evaluate(() => new Promise((resolve) => {
     const g = window.__game;
-    window.__autopilotStop();
-    const hit = {};
-    const b = g.layout.buildings.find((x) => {
-      if (x.landmark || x.h < 60 || x.w < 24 || x.tiers.length > 1) return false;
-      const t = x.tiers[0];
-      const start = { x: t.x, y: 25, z: t.z - t.d / 2 - 30 };
-      return g.collision.heightAt(start.x, start.z) < 0.01
-        && g.collision.raycast(start, { x: 0, y: 0, z: 1 }, 40, hit) && Math.abs(hit.z - (t.z - t.d / 2)) < 0.01;
-    });
-    const t = b.tiers[0];
     const before = g.destruction.stats();
-    g.flight.mode = 'air';
-    g.flight.pos.set(t.x, 25, t.z - t.d / 2 - 30);
-    g.flight.yaw = 0;
-    g.flight.pitch = 0;
-    g.flight.vel.set(0, 0, 150);
-    g.autopilot({ forward: 1 });
+    const shot = window.__launch(Infinity, 150);
     setTimeout(() => {
       const after = g.destruction.stats();
-      resolve({ breaches: after.breaches - before.breaches, debris: after.debris - before.debris, passed: g.flight.pos.z > t.z + t.d / 2 });
+      resolve({ bi: shot.bi, breaches: after.breaches - before.breaches, debris: after.debris - before.debris, passed: shot.passed() });
     }, 1200);
   }));
   console.log(`atravessar: ${smash.breaches} rupturas, ${smash.debris} pedaços de entulho, passou: ${smash.passed}`);
   if (smash.breaches < 2 || smash.debris < 10 || !smash.passed) { console.error('Atravessar prédio falhou.'); failed = true; }
+  // Desabar: supersônico num prédio estreito, uma passada basta; a parte de cima cai e sobra
+  // o toco (teto da colisão na altura dos escombros).
+  const fall = await page.evaluate((skip) => new Promise((resolve) => {
+    const g = window.__game;
+    const shot = window.__launch(34, 420, skip);
+    setTimeout(() => {
+      const tops = g.collision.boxes.filter((b) => b.building === shot.bi).map((b) => b.maxY);
+      resolve({ collapsed: g.collapses.isCollapsed(shot.bi), active: g.collapses.active, top: Math.max(...tops) });
+    }, 8000);
+  }), smash.bi);
+  console.log(`desabar: desabou ${fall.collapsed}, em andamento ${fall.active}, teto ${fall.top.toFixed(1)} m`);
+  if (!fall.collapsed || fall.active || fall.top > 3.01) { console.error('Desabamento falhou.'); failed = true; }
   if (errors.length) { console.error('Erros no console:\n' + errors.join('\n')); failed = true; }
   const missing = Object.entries(state?.doneBy ?? { aneis: 0, resgate: 0, drones: 0 }).filter(([, n]) => !n).map(([k]) => k);
   if (missing.length) { console.error(`Sem vitória em ${LIMIT_S} s: ${missing.join(', ')}.`); failed = true; }
-  if (!failed) console.log(`OK — anéis, resgate e drones cumpridos (${state.score} pontos) e prédio atravessado. Screenshots em ${OUT}/.`);
+  if (!failed) console.log(`OK — anéis, resgate e drones cumpridos (${state.score} pontos); prédio atravessado e derrubado. Screenshots em ${OUT}/.`);
 } finally {
   await browser.close();
   await new Promise((r) => server.httpServer.close(r));

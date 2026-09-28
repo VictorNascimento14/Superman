@@ -148,9 +148,9 @@ function makeLandmark(b) {
 // Caixas de colisão (AABB) de todos os níveis de todos os prédios.
 export function collisionBoxes(layout) {
   const boxes = [];
-  for (const b of layout.buildings) {
+  layout.buildings.forEach((b, building) => {
     for (const t of b.tiers) {
-      boxes.push({ minX: t.x - t.w / 2, minY: t.y0, minZ: t.z - t.d / 2, maxX: t.x + t.w / 2, maxY: t.y1, maxZ: t.z + t.d / 2, breakable: true });
+      boxes.push({ minX: t.x - t.w / 2, minY: t.y0, minZ: t.z - t.d / 2, maxX: t.x + t.w / 2, maxY: t.y1, maxZ: t.z + t.d / 2, breakable: true, building });
     }
     if (b.globe) {
       // Caixa a 75% do raio: com o raio inteiro o herói ficava em pé no ar nas quinas.
@@ -158,7 +158,7 @@ export function collisionBoxes(layout) {
       const r = g.r * 0.75;
       boxes.push({ minX: g.x - r, minY: b.h, minZ: g.z - r, maxX: g.x + r, maxY: g.y + r, maxZ: g.z + r });
     }
-  }
+  });
   // Laje da ilha e gramado: sem elas o piso era o plano y = 0 em toda parte — pernas
   // enterradas 0,6 m no parque e pouso 1,2 m acima da água. O piso infinito do mundo de
   // colisão fica no nível do mar (main.js).

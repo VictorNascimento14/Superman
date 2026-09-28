@@ -1,12 +1,13 @@
 import * as THREE from 'three';
 import { createDebris } from './debrisSim.js';
 import { createRng } from '../core/rng.js';
+import { hideInstancesIn } from './instances.js';
 
 // Rastro de quem atravessa um prédio: furo na fachada (entrada e saída), entulho com física
 // e poeira. Tudo em pools de tamanho fixo — nada aloca por quadro.
 const HOLES = 160;
 const CHUNKS = 1200;
-const PUFFS = 96;
+const PUFFS = 160;
 const PUFF_LIFE = 3.5;
 
 const Z = new THREE.Vector3(0, 0, 1);
@@ -51,6 +52,9 @@ export function createBreachFx(scene) {
   const dustSize = new Float32Array(PUFFS);
   const dustAlpha = new Float32Array(PUFFS);
   const dustAge = new Float32Array(PUFFS).fill(PUFF_LIFE);
+  const dustLife = new Float32Array(PUFFS).fill(PUFF_LIFE);
+  const dustMax = new Float32Array(PUFFS);
+  const dustPeak = new Float32Array(PUFFS);
   const dustGeo = new THREE.BufferGeometry();
   dustGeo.setAttribute('position', new THREE.BufferAttribute(dustPos, 3).setUsage(THREE.DynamicDrawUsage));
   dustGeo.setAttribute('size', new THREE.BufferAttribute(dustSize, 1).setUsage(THREE.DynamicDrawUsage));
@@ -86,8 +90,38 @@ export function createBreachFx(scene) {
   scene.add(dust);
   let dustNext = 0;
 
+  // Uma nuvem: cresce de 3 m até `max`, começa com opacidade `peak` e some em `life`
+  // segundos, subindo devagar.
+  function puff(x, y, z, vx, vy, vz, max = 14, life = PUFF_LIFE, peak = 0.55) {
+    const i = dustNext;
+    dustNext = (dustNext + 1) % PUFFS;
+    const o = i * 3;
+    dustPos[o] = x; dustPos[o + 1] = y; dustPos[o + 2] = z;
+    dustVel[o] = vx; dustVel[o + 1] = vy; dustVel[o + 2] = vz;
+    dustAge[i] = 0;
+    dustLife[i] = life;
+    dustMax[i] = max;
+    dustPeak[i] = peak;
+  }
+
+  // Estouro genérico (desabamento): `count` pedaços saindo de (x, y, z) com velocidade base
+  // (vx, vy, vz), espalhamento `spread` e tamanho até `sizeMax`.
+  function burst(x, y, z, vx, vy, vz, count, spread, sizeMax) {
+    for (let i = 0; i < count; i++) {
+      const s = 0.3 + Math.random() ** 2 * (sizeMax - 0.3);
+      const idx = debris.spawn(
+        x + (Math.random() - 0.5) * spread, y + Math.random() * 2, z + (Math.random() - 0.5) * spread,
+        vx + (Math.random() - 0.5) * spread, vy + Math.random() * 3, vz + (Math.random() - 0.5) * spread,
+        s, (Math.random() - 0.5) * 6, (Math.random() - 0.5) * 6, (Math.random() - 0.5) * 6,
+      );
+      chunks.setColorAt(idx, col.set(Math.random() < 0.12 ? GLASS : CONCRETE[(Math.random() * CONCRETE.length) | 0]));
+    }
+    chunks.instanceColor.needsUpdate = true;
+  }
+
   // Um furo por evento (entrada ou saída), com entulho e poeira proporcionais à velocidade.
   function spawn(e) {
+    if (e.at.y < -1) return; // nível que já desabou (a caixa foi para debaixo da terra)
     breaches++;
     const exit = !e.entry;
     const k = Math.min(1, e.speed / 200);
@@ -124,17 +158,12 @@ export function createBreachFx(scene) {
     }
     chunks.instanceColor.needsUpdate = true;
 
+    const push = exit ? e.speed * 0.03 : 0;
     for (let i = 0, puffs = exit ? 6 : 3; i < puffs; i++) {
-      const o = dustNext * 3;
-      dustNext = (dustNext + 1) % PUFFS;
-      dustPos[o] = e.at.x + n.x * 2 + (Math.random() - 0.5) * 3;
-      dustPos[o + 1] = e.at.y + n.y * 2 + (Math.random() - 0.5) * 3;
-      dustPos[o + 2] = e.at.z + n.z * 2 + (Math.random() - 0.5) * 3;
-      const push = exit ? e.speed * 0.03 : 0;
-      dustVel[o] = n.x * (1.5 + Math.random() * 2) + e.dir.x * push;
-      dustVel[o + 1] = n.y * (1.5 + Math.random() * 2) + e.dir.y * push + 0.6;
-      dustVel[o + 2] = n.z * (1.5 + Math.random() * 2) + e.dir.z * push;
-      dustAge[o / 3] = 0;
+      puff(
+        e.at.x + n.x * 2 + (Math.random() - 0.5) * 3, e.at.y + n.y * 2 + (Math.random() - 0.5) * 3, e.at.z + n.z * 2 + (Math.random() - 0.5) * 3,
+        n.x * (1.5 + Math.random() * 2) + e.dir.x * push, n.y * (1.5 + Math.random() * 2) + e.dir.y * push + 0.6, n.z * (1.5 + Math.random() * 2) + e.dir.z * push,
+      );
     }
   }
 
@@ -152,18 +181,18 @@ export function createBreachFx(scene) {
     if (debris.count) chunks.instanceMatrix.needsUpdate = true;
 
     for (let i = 0; i < PUFFS; i++) {
-      if (dustAge[i] >= PUFF_LIFE) {
+      if (dustAge[i] >= dustLife[i]) {
         dustAlpha[i] = 0;
         continue;
       }
       const o = i * 3;
       dustAge[i] += dt;
-      const t = Math.min(1, dustAge[i] / PUFF_LIFE);
+      const t = Math.min(1, dustAge[i] / dustLife[i]);
       const drag = Math.exp(-dt * 0.8);
       dustVel[o] *= drag; dustVel[o + 1] = dustVel[o + 1] * drag + 0.3 * dt; dustVel[o + 2] *= drag;
       dustPos[o] += dustVel[o] * dt; dustPos[o + 1] += dustVel[o + 1] * dt; dustPos[o + 2] += dustVel[o + 2] * dt;
-      dustSize[i] = 3 + 11 * Math.sqrt(t);
-      dustAlpha[i] = 0.55 * (1 - t) ** 1.5;
+      dustSize[i] = 3 + (dustMax[i] - 3) * Math.sqrt(t);
+      dustAlpha[i] = dustPeak[i] * (1 - t) ** 1.5;
     }
     dustGeo.attributes.position.needsUpdate = true;
     dustGeo.attributes.size.needsUpdate = true;
@@ -173,7 +202,10 @@ export function createBreachFx(scene) {
 
   return {
     spawn,
+    burst,
+    puff,
     update,
+    clearMarks: (box) => hideInstancesIn(holes, box),
     stats: () => ({ breaches, holes: holes.count, debris: debris.count }),
   };
 }
