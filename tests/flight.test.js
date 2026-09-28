@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createFlight, FLIGHT, SMASH } from '../src/player/flight.js';
 import { createCollisionWorld } from '../src/world/collision.js';
+import { EARTH, SPACE } from '../src/space/nav.js';
 
 // Um prédio de 10 × 50 × 10 em x ∈ [0, 10], z ∈ [100, 110].
 const world = createCollisionWorld([{ minX: 0, minY: 0, minZ: 100, maxX: 10, maxY: 50, maxZ: 110 }]);
@@ -152,4 +153,53 @@ test('orientação: em pé fica vertical; voando rápido deita na direção do v
   // Cabeça (eixo +y local) no mundo ≈ +z (yaw 0).
   const hz = 2 * (q.y * q.z + q.w * q.x) * head.y;
   assert.ok(hz > 0.9, `cabeça z = ${hz}`);
+});
+
+// --- Espaço em escala real.
+const boostUp = { ...idle, forward: 1, boost: true };
+function inSpace(x, y, z, pitch) {
+  const f = airborne();
+  f.pos.set(x, y, z);
+  f.vel.set(0, 0, 0);
+  f.pitch = pitch;
+  return f;
+}
+
+test('espaço: com boost a subida é exponencial — 20 km → 20.000 km em menos de 15 s', () => {
+  const f = inSpace(0, 25e3, 0, 1.45);
+  let t = 0;
+  while (f.altitude < 2e7 && t < 30) { f.update(1 / 60, boostUp); t += 1 / 60; }
+  assert.ok(t < 15, `levou ${t.toFixed(1)} s`);
+});
+
+test('espaço: descendo a toda (C + boost) sobre a cidade, chega sem atravessar a superfície', () => {
+  // Com o pitch limitado a 83°, "mirar para baixo" ainda deriva 12% na horizontal: de 20.000 km
+  // cairia a milhares de km da cidade. Descer na vertical é a tecla de descer.
+  const f = inSpace(0, 2e7, 0, 0);
+  let low = Infinity;
+  for (let t = 0; t < 40; t += 1 / 60) {
+    f.update(1 / 60, { ...idle, up: -1, boost: true });
+    low = Math.min(low, f.altitude);
+  }
+  assert.ok(low > -1, `atravessou: ${low} m`);
+  assert.ok(f.altitude < 50, `não chegou: ${f.altitude} m`);
+});
+
+test('espaço: longe da cidade não desce abaixo do piso — só Metrópolis tem chão', () => {
+  const a = 5e5 / EARTH.radius; // 500 km da cidade pela superfície, 100 km de altitude
+  const r = EARTH.radius + 1e5;
+  const f = inSpace(Math.sin(a) * r, Math.cos(a) * r - EARTH.radius, 0, -1.45);
+  let low = Infinity;
+  for (let t = 0; t < 20; t += 1 / 60) {
+    f.update(1 / 60, boostUp);
+    low = Math.min(low, f.altitude);
+  }
+  assert.ok(low > SPACE.floor - 1, `desceu a ${low} m`);
+});
+
+test('espaço: do outro lado da Terra, o chão plano da cidade não puxa o herói', () => {
+  const f = inSpace(0, -2 * EARTH.radius - 5e5, 0, 0);
+  run(f, idle, 1);
+  assert.ok(f.pos.y < -EARTH.radius, `puxado para y = ${f.pos.y}`);
+  assert.ok(Math.abs(f.altitude - 5e5) < 1, `altitude ${f.altitude}`);
 });

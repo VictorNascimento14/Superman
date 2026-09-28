@@ -115,6 +115,25 @@ try {
   await page.screenshot({ path: `${OUT}/longe.png` });
   console.log(`origem flutuante: câmera a ${far.toFixed(1)} m da origem de render, a 5·10⁸ m da cidade`);
   if (far > 100) { console.error('Origem flutuante falhou.'); failed = true; }
+  // Espaço: de 25 km, subindo na vertical com boost, em 8 s passa de 1.000 km (hipervelocidade)
+  // e a Terra aparece; descendo na vertical (C + boost), em 15 s volta para perto da cidade.
+  const up = await page.evaluate(() => new Promise((resolve) => {
+    const g = window.__game;
+    g.heat(false);
+    g.flight.mode = 'air';
+    g.flight.vel.set(0, 0, 0);
+    g.flight.pos.set(0, 25e3, 0);
+    g.flight.pitch = -1.2; // olhando para a Terra
+    g.autopilot({ up: 1, boost: true });
+    setTimeout(() => resolve(g.flight.altitude), 8000);
+  }));
+  await page.screenshot({ path: `${OUT}/espaco.png` });
+  const down = await page.evaluate(() => new Promise((resolve) => {
+    window.__game.autopilot({ up: -1, boost: true });
+    setTimeout(() => resolve(window.__game.flight.altitude), 15000);
+  }));
+  console.log(`espaço: subiu a ${Math.round(up / 1000)} km em 8 s; desceu a ${Math.round(down)} m em 15 s`);
+  if (up < 1e6 || down > 5000) { console.error('Ida e volta ao espaço falhou.'); failed = true; }
   if (errors.length) { console.error('Erros no console:\n' + errors.join('\n')); failed = true; }
   const missing = Object.entries(state?.doneBy ?? { aneis: 0, resgate: 0, drones: 0 }).filter(([, n]) => !n).map(([k]) => k);
   if (missing.length) { console.error(`Sem vitória em ${LIMIT_S} s: ${missing.join(', ')}.`); failed = true; }
