@@ -4,6 +4,7 @@ import { createFlight, FLIGHT, SMASH } from '../src/player/flight.js';
 import { createCollisionWorld } from '../src/world/collision.js';
 import { EARTH, SPACE } from '../src/space/nav.js';
 import { solarSystem, SUN_I } from '../src/space/bodies.js';
+import { SOLAR } from '../src/powers/solar.js';
 import { Vector3 } from 'three';
 
 // Um prédio de 10 × 50 × 10 em x ∈ [0, 10], z ∈ [100, 110].
@@ -99,6 +100,33 @@ test('rápido contra um prédio: fura, atravessa e sai do outro lado mais devaga
   assert.ok(inn.entry && Math.abs(inn.at.z - 100) < 0.5 && inn.normal.z < -0.99, 'furo de entrada fora da face da frente');
   assert.ok(!out.entry && Math.abs(out.at.z - 110) < 0.5 && out.normal.z > 0.99, 'furo de saída fora da face de trás');
   assert.ok(out.speed < inn.speed, `saiu a ${out.speed} m/s, entrou a ${inn.speed}`);
+});
+
+test('carga solar: o prédio freia menos e o golpe tem o triplo da força', () => {
+  // Cada um entra na velocidade do próprio boost, que é o alvo da direção: ela não ajuda
+  // ninguém, e o que sobra depois de 40 m de prédio é só o freio dele.
+  const cross = (charge) => {
+    const f = flyingIn(deep);
+    f.charge = charge;
+    const v0 = FLIGHT.boost * (1 + SOLAR.speed * charge);
+    f.pos.set(5, 20, 90);
+    f.vel.set(0, 0, v0);
+    while (f.pos.z < 140) f.update(1 / 60, { ...idle, forward: 1, boost: true });
+    return { kept: f.speed / v0, inn: breaches(f)[0] };
+  };
+  const plain = cross(0);
+  const full = cross(1);
+  assert.ok(full.kept > plain.kept + 0.15, `sobrou ${(full.kept * 100).toFixed(0)}% carregado, ${(plain.kept * 100).toFixed(0)}% sem carga`);
+  assert.ok(Math.abs(full.inn.force - 3 * full.inn.speed) < 1e-9, `força ${full.inn.force}`);
+  assert.equal(plain.inn.force, plain.inn.speed);
+});
+
+test('carga solar: cheia, o voo fica 2,5 vezes mais rápido', () => {
+  const f = airborne(300);
+  f.pos.set(-500, 300, -500);
+  f.charge = 1;
+  run(f, { ...idle, forward: 1 }, 5);
+  assert.ok(Math.abs(f.speed - FLIGHT.cruise * 2.5) < 1, `cruzeiro carregado a ${f.speed} m/s`);
 });
 
 test('devagar contra o prédio: ele continua sólido', () => {

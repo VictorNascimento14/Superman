@@ -4,11 +4,12 @@ export const ENERGY = { drain: 0.22, regen: 0.18, regenDelay: 0.8, restart: 0.2 
 
 export function createEnergy() {
   const e = { value: 1, firing: false, idle: 0, locked: false };
-  e.update = (dt, wants) => {
+  // drainMul < 1: a carga solar paga parte do disparo (0 = de graça).
+  e.update = (dt, wants, drainMul = 1) => {
     if (e.locked && e.value >= ENERGY.restart) e.locked = false;
     e.firing = wants && !e.locked && e.value > 0;
     if (e.firing) {
-      e.value = Math.max(0, e.value - ENERGY.drain * dt);
+      e.value = Math.max(0, e.value - ENERGY.drain * drainMul * dt);
       e.idle = 0;
       if (e.value === 0) e.locked = true;
     } else {

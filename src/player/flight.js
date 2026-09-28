@@ -1,5 +1,6 @@
 import { Vector3, Quaternion, Matrix4, MathUtils } from 'three';
 import { altitude, fromCity, nearCity, speedCap, nearestSurface, EARTH_ONLY, SPACE } from '../space/nav.js';
+import { SOLAR } from '../powers/solar.js';
 
 // Física de voo. Só usa as classes de matemática do three (rodam no Node sem DOM),
 // por isso é testada em tests/flight.test.js.
@@ -45,6 +46,7 @@ export function createFlight(collision, spawn) {
     altitude: 0, // até a superfície da Terra (esfera), não até o chão da cidade
     bodies: EARTH_ONLY, // corpos celestes (o primeiro é a Terra); o jogo põe o sistema solar
     nearest: { i: 0, d: 0 }, // corpo com a superfície mais perto e a distância até ela
+    charge: 0, // carga solar (0–1): mais velocidade e mais força contra prédio
   };
   // Vetores de trabalho: nada aloca no update (invariante 2).
   const dir = new Vector3();
@@ -75,19 +77,23 @@ export function createFlight(collision, spawn) {
     if (sp > 1e-6) s.vel.multiplyScalar(v / sp);
   };
 
+  // Com carga solar o herói bate com mais força (o dano do prédio usa `force`) e o prédio o
+  // freia menos.
+  const might = () => 1 + SOLAR.force * s.charge;
+
   function enterBuilding(idx, nx, ny, nz) {
     smashing[smashing.indexOf(-1)] = idx;
     smashCount++;
     const speed = s.vel.length();
     const b = collision.boxes[idx];
     s.events.push({
-      type: 'breach', entry: true, box: idx, speed,
+      type: 'breach', entry: true, box: idx, speed, force: speed * might(),
       // Ponto da caixa mais perto do centro: está na fachada (centro − normal·raio ficaria
       // dentro da parede quando a esfera já entrou um pouco).
       at: new Vector3(MathUtils.clamp(s.pos.x, b.minX, b.maxX), MathUtils.clamp(s.pos.y, b.minY, b.maxY), MathUtils.clamp(s.pos.z, b.minZ, b.maxZ)),
       normal: new Vector3(nx, ny, nz), dir: s.vel.clone().divideScalar(speed),
     });
-    setSpeed(Math.max(SMASH.min, speed - SMASH.entry));
+    setSpeed(Math.max(SMASH.min, speed - SMASH.entry / might()));
   }
 
   // A cada subpasso: quem ainda está dentro perde velocidade pelo caminho; quem saiu deixa o
@@ -107,7 +113,7 @@ export function createFlight(collision, spawn) {
       const speed = s.vel.length();
       if (d2 < FLIGHT.radius * FLIGHT.radius) {
         // Cada metro custa perMeter × v: a 420 m/s o prédio freia mais que a 50.
-        setSpeed(Math.max(SMASH.min, speed - SMASH.perMeter * speed * speed * h));
+        setSpeed(Math.max(SMASH.min, speed - (SMASH.perMeter / might()) * speed * speed * h));
         continue;
       }
       smashing[k] = -1;
@@ -213,6 +219,7 @@ export function createFlight(collision, spawn) {
       const wasSuper = s.supersonic;
       s.supersonic = s.boostTime > FLIGHT.supersonicAfter;
       const tier = s.supersonic ? 'supersonic' : input.boost ? 'boost' : 'cruise';
+      const fast = 1 + SOLAR.speed * s.charge; // carga solar: tudo mais rápido
       // O corpo mais perto comanda: no espaço, o boost vira hipervelocidade com alvo
       // proporcional à distância até ele — a subida é exponencial e a chegada, suave.
       const alt = nearestSurface(s.bodies, s.pos, s.nearest).d;
@@ -220,7 +227,7 @@ export function createFlight(collision, spawn) {
       if (thrust) {
         wish.copy(dir).multiplyScalar(input.forward).addScaledVector(right, input.right).addScaledVector(UP, input.up);
         if (wish.lengthSq() > 1) wish.normalize();
-        wish.multiplyScalar(hyper ? Math.max(FLIGHT[tier], SPACE.hyper * alt) : FLIGHT[tier]);
+        wish.multiplyScalar(hyper ? Math.max(FLIGHT[tier] * fast, SPACE.hyper * alt) : FLIGHT[tier] * fast);
         const k = 1 - Math.exp(-dt * (hyper ? SPACE.hyper : FLIGHT.steer[tier]));
         s.vel.lerp(wish, k);
       } else {
@@ -228,7 +235,7 @@ export function createFlight(collision, spawn) {
       }
       // Teto duro proporcional à distância: em cada quadro anda bem menos que ela, então a
       // aproximação é suave e nunca atravessa a superfície de nada.
-      const cap = speedCap(alt, FLIGHT.supersonic);
+      const cap = speedCap(alt, FLIGHT.supersonic * fast);
       if (s.vel.lengthSq() > cap * cap) s.vel.setLength(cap);
       move(dt);
       floorBodies();

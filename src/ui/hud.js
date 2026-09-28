@@ -24,6 +24,9 @@ const CSS = `
 #hud .cross { position: absolute; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%; background: rgba(255,255,255,.8); box-shadow: 0 0 0 2px rgba(0,0,0,.25); }
 #hud .energy { position: absolute; left: 50%; bottom: 26px; width: 180px; height: 5px; margin-left: -90px; background: rgba(255,255,255,.15); border-radius: 3px; overflow: hidden; }
 #hud .energy i { display: block; height: 100%; width: 100%; background: #ff3b24; box-shadow: 0 0 8px #ff3b24; }
+#hud .solar { position: absolute; left: 50%; bottom: 38px; width: 180px; margin-left: -90px; display: none; font-size: 10px; letter-spacing: .14em; color: #ffd76a; text-align: center; text-shadow: 0 0 6px rgba(255,190,60,.8); }
+#hud .solar div { height: 5px; margin-top: 3px; background: rgba(255,255,255,.15); border-radius: 3px; overflow: hidden; }
+#hud .solar i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #ff9d2e, #ffe27a); box-shadow: 0 0 10px #ffc94a; }
 #hud .help { position: absolute; top: 18px; right: 22px; padding: 12px 16px; background: rgba(10,20,45,.72); border-radius: 10px; font-weight: 500; line-height: 1.6; display: none; }
 #hud .help.on { display: block; }
 #hud .help b { color: #f2c230; }
@@ -62,6 +65,7 @@ export function createHud(layout) {
     <div class="toast"></div>
     <div class="cross"></div>
     <div class="energy"><i></i></div>
+    <div class="solar"><span>CARGA SOLAR</span><div><i></i></div></div>
     <div class="speed"><b>0</b><small class="unit">km/h</small><div class="bar"><i></i></div><small class="alt">0 m</small><br><span class="mode">EM PÉ</span></div>
     <canvas class="map" width="400" height="400"></canvas>
     <div class="help">
@@ -72,7 +76,7 @@ export function createHud(layout) {
   const $ = (s) => el.querySelector(s);
   const ui = {
     speed: $('.speed b'), unit: $('.unit'), bar: $('.bar i'), alt: $('.alt'), mode: $('.mode'),
-    objective: $('.objective'), toast: $('.toast'), energy: $('.energy i'), help: $('.help'), map: $('.map'), dust: $('.dust'),
+    objective: $('.objective'), toast: $('.toast'), energy: $('.energy i'), solar: $('.solar'), solarText: $('.solar span'), solarBar: $('.solar i'), help: $('.help'), map: $('.map'), dust: $('.dust'),
   };
   const ctx = ui.map.getContext('2d');
   const base = drawBaseMap(layout);
@@ -149,6 +153,13 @@ export function createHud(layout) {
     setObjective: (text) => set('obj', ui.objective, text ?? ''),
     setMarkers: (list) => { markers = list; },
     setEnergy: (k) => set('energy', ui.energy.style, `${Math.round(k * 100)}%`, 'width'),
+    // Carga solar (0–1): a barra dourada só aparece com carga.
+    setSolar(k) {
+      set('solarOn', ui.solar.style, k > 0.004 ? 'block' : 'none', 'display');
+      const pct = `${Math.round(k * 100)}%`;
+      set('solarText', ui.solarText, `CARGA SOLAR ${pct}`);
+      set('solarBar', ui.solarBar.style, pct, 'width');
+    },
     // Marcador i em (x, y) px, com o nome e a distância (m); `on` false esconde.
     setBeacon(i, name, x, y, meters, on) {
       const b = beacons[i];

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { hideInstancesIn } from '../fx/instances.js';
 import { createEnergy, raySphere } from './energy.js';
+import { SOLAR } from './solar.js';
 
 const RANGE = 700;
 const MAX_SCORCH = 400;
@@ -111,25 +112,39 @@ export function createHeatVision(scene, hero, collision, camera) {
     sparkGeo.attributes.position.needsUpdate = true;
   }
 
+  // Carga solar (0–1): mais alcance, mais dano, raio mais grosso e mais branco, e a reserva
+  // paga pelo Sol.
+  let charge = 0;
+  const coreCold = core.color.clone();
+  const coreHot = new THREE.Color(8, 7, 5);
+  const haloCold = halo.color.clone();
+  const haloHot = new THREE.Color(3, 1.4, 0.3);
+  function setCharge(k) {
+    charge = k;
+    core.color.lerpColors(coreCold, coreHot, k);
+    halo.color.lerpColors(haloCold, haloHot, k);
+  }
+
   // Devolve o ponto mirado (e preenche `hit`); alvos vencem prédios mais distantes.
   function trace() {
     origin.copy(camera.position);
     camera.getWorldDirection(dir);
-    let best = RANGE;
+    const range = RANGE * (1 + SOLAR.range * charge);
+    let best = range;
     let target = null;
-    if (collision.raycast(origin, dir, RANGE, hit)) best = hit.dist;
+    if (collision.raycast(origin, dir, range, hit)) best = hit.dist;
     for (const t of targets) {
       const d = raySphere(origin, dir, t.pos, t.radius);
       if (d >= 0 && d < best) { best = d; target = t; }
     }
     aim.copy(origin).addScaledVector(dir, best);
-    return { target, surface: !target && best < RANGE };
+    return { target, surface: !target && best < range };
   }
 
   let heat = 0;
   let hitting = false;
   function update(dt, wants) {
-    const firing = energy.update(dt, wants);
+    const firing = energy.update(dt, wants, 1 - charge);
     heat += ((firing ? 1 : 0) - heat) * (1 - Math.exp(-dt * 12));
     hero.eyeMat.emissiveIntensity = heat * 12;
     updateSparks(dt);
@@ -152,7 +167,7 @@ export function createHeatVision(scene, hero, collision, camera) {
       b.lookAt(scene.localToWorld(aimW.copy(aim)));
       b.scale.z = eye.distanceTo(aim);
       // Tremor fino no raio: calor não é linha de laser.
-      const j = 1 + Math.sin(performance.now() * 0.05 + k) * 0.15;
+      const j = (1 + Math.sin(performance.now() * 0.05 + k) * 0.15) * (1 + 1.2 * charge);
       b.scale.x = b.scale.y = j;
     });
     light.position.copy(aim);
@@ -161,7 +176,7 @@ export function createHeatVision(scene, hero, collision, camera) {
     glow.visible = surface || !!target;
     glow.scale.setScalar(1.8 + Math.random() * 0.8);
     if (target) {
-      target.hit(dt, aim);
+      target.hit(dt * (1 + SOLAR.power * charge), aim);
       emitSparks(aim, back.copy(dir).negate(), 3);
     } else if (surface) {
       n.set(hit.nx, hit.ny, hit.nz);
@@ -174,7 +189,7 @@ export function createHeatVision(scene, hero, collision, camera) {
   }
 
   return {
-    update, energy, targets,
+    update, energy, targets, setCharge,
     clearMarks: (box) => hideInstancesIn(scorch, box), // prédio desabou: marca não fica no ar
     get firing() { return energy.firing; },
     get hitting() { return hitting; },
