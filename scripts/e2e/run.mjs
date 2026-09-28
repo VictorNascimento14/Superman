@@ -1,5 +1,6 @@
 // Ponta a ponta: builda, serve o dist, abre o Chrome headless e deixa o autopiloto
-// cumprir as três missões. Falha se o console tiver erro ou se alguma missão não fechar.
+// cumprir as três missões. Falha se o console tiver erro ou se algum dos três tipos
+// (anéis, resgate, drones) não tiver ao menos uma vitória.
 //   npm run e2e                       (Chrome em /usr/bin/google-chrome)
 //   CHROME_PATH=/caminho npm run e2e
 import { readFile, mkdir } from 'node:fs/promises';
@@ -35,18 +36,21 @@ try {
   let state;
   while ((Date.now() - t0) / 1000 < LIMIT_S) {
     await new Promise((r) => setTimeout(r, 2000));
-    state = await page.evaluate(() => ({ type: window.__game.missions.current?.type ?? null, done: window.__game.missions.done, score: window.__game.missions.score }));
+    state = await page.evaluate(() => ({ type: window.__game.missions.current?.type ?? null, doneBy: window.__game.missions.doneBy, score: window.__game.missions.score }));
     if (state.type && !seen.has(state.type)) {
       seen.add(state.type);
       await new Promise((r) => setTimeout(r, 1500));
       await page.screenshot({ path: `${OUT}/${state.type}.png` });
     }
-    console.log(`${Math.round((Date.now() - t0) / 1000)}s  missão=${state.type ?? '—'}  cumpridas=${state.done}  pontos=${state.score}`);
-    if (state.done >= 3) break;
+    const { aneis, resgate, drones } = state.doneBy;
+    console.log(`${Math.round((Date.now() - t0) / 1000)}s  missão=${state.type ?? '—'}  cumpridas: anéis ${aneis} · resgate ${resgate} · drones ${drones}  pontos=${state.score}`);
+    // Três vitórias de qualquer tipo não bastam: um resgate quebrado passaria com anéis de novo.
+    if (aneis && resgate && drones) break;
   }
   if (errors.length) { console.error('Erros no console:\n' + errors.join('\n')); failed = true; }
-  if (!state || state.done < 3) { console.error(`Só ${state?.done ?? 0} de 3 missões cumpridas em ${LIMIT_S} s.`); failed = true; }
-  if (!failed) console.log(`OK — 3 missões cumpridas, ${state.score} pontos. Screenshots em ${OUT}/.`);
+  const missing = Object.entries(state?.doneBy ?? { aneis: 0, resgate: 0, drones: 0 }).filter(([, n]) => !n).map(([k]) => k);
+  if (missing.length) { console.error(`Sem vitória em ${LIMIT_S} s: ${missing.join(', ')}.`); failed = true; }
+  if (!failed) console.log(`OK — anéis, resgate e drones cumpridos, ${state.score} pontos. Screenshots em ${OUT}/.`);
 } finally {
   await browser.close();
   await new Promise((r) => server.httpServer.close(r));

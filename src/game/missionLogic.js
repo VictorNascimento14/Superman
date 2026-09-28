@@ -19,6 +19,32 @@ export function ringCrossed(p0, p1, ring) {
 // Percurso de anéis: cada um 170–260 m depois do anterior, curvas de até ±45°, sempre
 // acima dos telhados com folga e dentro da ilha. A normal aponta para o próximo anel.
 export function makeRingCourse(rng, start, yaw, collision, count = 8, radius = 10) {
+  let rings = placeRings(rng, start, yaw, collision, count, radius);
+  if (!rings.length) {
+    // Do mar, ou da beirada olhando para fora, não cabe anel à frente: o circuito parte de
+    // dentro da ilha, rumo ao centro. A 260 m (passo máximo) da borda útil, qualquer
+    // primeira curva cabe.
+    const lim = HALF - 60 - 260;
+    const clamp = (v) => Math.max(-lim, Math.min(lim, v));
+    start = { x: clamp(start.x), y: start.y, z: clamp(start.z) };
+    rings = placeRings(rng, start, Math.atan2(-start.x, -start.z), collision, count, radius);
+  }
+  for (let i = 0; i < rings.length; i++) {
+    const a = rings[i];
+    const b = rings[i + 1] ?? { x: a.x + (a.x - (rings[i - 1]?.x ?? start.x)), y: a.y, z: a.z + (a.z - (rings[i - 1]?.z ?? start.z)) };
+    const prev = i === 0 ? start : rings[i - 1];
+    // Normal = direção de chegada (de onde o herói vem), suavizada com a de saída.
+    let nx = b.x - prev.x;
+    let ny = (b.y - prev.y) * 0.5;
+    let nz = b.z - prev.z;
+    const l = Math.hypot(nx, ny, nz) || 1;
+    a.normal = { x: nx / l, y: ny / l, z: nz / l };
+  }
+  return rings;
+}
+
+// Coloca até `count` anéis a partir de `start`; para no primeiro que não coube.
+function placeRings(rng, start, yaw, collision, count, radius) {
   const rings = [];
   let x = start.x;
   let z = start.z;
@@ -43,17 +69,6 @@ export function makeRingCourse(rng, start, yaw, collision, count = 8, radius = 1
     }
     if (!placed) break;
     rings.push(placed);
-  }
-  for (let i = 0; i < rings.length; i++) {
-    const a = rings[i];
-    const b = rings[i + 1] ?? { x: a.x + (a.x - (rings[i - 1]?.x ?? start.x)), y: a.y, z: a.z + (a.z - (rings[i - 1]?.z ?? start.z)) };
-    const prev = i === 0 ? start : rings[i - 1];
-    // Normal = direção de chegada (de onde o herói vem), suavizada com a de saída.
-    let nx = b.x - prev.x;
-    let ny = (b.y - prev.y) * 0.5;
-    let nz = b.z - prev.z;
-    const l = Math.hypot(nx, ny, nz) || 1;
-    a.normal = { x: nx / l, y: ny / l, z: nz / l };
   }
   return rings;
 }

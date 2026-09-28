@@ -27,6 +27,26 @@ test('percurso: anéis dentro da ilha, acima dos telhados e com normal unitária
   }
 });
 
+test('percurso: da beirada olhando para fora ou do mar, o circuito não sai vazio', () => {
+  // Circuito vazio derrubava o jogo: ringCrossed(…, undefined) a cada quadro.
+  const collision = createCollisionWorld(collisionBoxes(generateLayout()));
+  const starts = [
+    [{ x: HALF - 20, y: 100, z: 0 }, Math.PI / 2], // beirada leste, olhando para o mar
+    [{ x: HALF + 400, y: 60, z: HALF + 400 }, 0], // sobre o mar, longe da ilha
+    [{ x: -HALF - 250, y: 80, z: 200 }, -Math.PI / 2], // mar a oeste, olhando para fora
+  ];
+  for (const [start, yaw] of starts) {
+    for (let seed = 1; seed <= 20; seed++) {
+      const rings = makeRingCourse(createRng(seed), start, yaw, collision);
+      assert.ok(rings.length >= 4, `seed ${seed} em (${start.x}, ${start.z}): só ${rings.length} anéis`);
+      for (const r of rings) {
+        assert.ok(Math.abs(r.x) < HALF && Math.abs(r.z) < HALF);
+        assert.ok(r.y - r.radius > collision.heightAt(r.x, r.z) + 5, 'anel dentro de prédio');
+      }
+    }
+  }
+});
+
 test('queda chega perto da velocidade terminal e termina no chão', () => {
   // v(t) = vt·tanh(g·t/vt): 97% da terminal em 12 s (e só 89% em 8 s).
   const f = { state: 'falling', y: 1000, vy: 0, ground: 0, x: 0, z: 0 };

@@ -18,6 +18,7 @@ export function createMissions({ scene, collision, layout, heatVision, hud }) {
   scene.add(root);
   let score = 0;
   let done = 0;
+  const doneBy = { aneis: 0, resgate: 0, drones: 0 }; // o e2e exige uma vitória de cada
   let idx = -1;
   let m = null; // missão atual
   let pause = 2; // respiro antes da primeira
@@ -90,7 +91,14 @@ export function createMissions({ scene, collision, layout, heatVision, hud }) {
       const d = Math.hypot(cx - flight.pos.x, cz - flight.pos.z);
       if (d > 300 && d < 850) break;
     }
-    const cy = 45 + rng.range(0, 40);
+    // A órbita (raio 22–40 m, ±13 m de altura) não pode cortar prédio: lá dentro o drone
+    // some e a visão de calor para na fachada. Fica acima do telhado mais alto em volta.
+    let roof = 0;
+    for (let k = 0; k < 16; k++) {
+      const a = (k / 16) * Math.PI * 2;
+      for (let r = 22; r <= 40; r += 9) roof = Math.max(roof, collision.heightAt(cx + Math.cos(a) * r, cz + Math.sin(a) * r));
+    }
+    const cy = Math.max(45 + rng.range(0, 40), roof + 20);
     const drones = Array.from({ length: 5 }, (_, k) => {
       const mesh = makeDrone();
       root.add(mesh);
@@ -102,7 +110,9 @@ export function createMissions({ scene, collision, layout, heatVision, hud }) {
           heatVision.targets.delete(d);
           hud.toast('DRONE ABATIDO', 1);
         }
-        d.mesh.children[0].material.emissive.setRGB(1, 0.3 + (1 - d.hp) * 0.5, 0);
+        const mat = d.mesh.children[0].material;
+        mat.emissive.setRGB(1, 0.3 + (1 - d.hp) * 0.5, 0);
+        mat.emissiveIntensity = 1 + (1 - d.hp) * 3; // nasce 0: sem isto o drone nunca esquenta
       };
       heatVision.targets.add(d);
       return d;
@@ -123,6 +133,7 @@ export function createMissions({ scene, collision, layout, heatVision, hud }) {
     if (ok) {
       score += points;
       done++;
+      doneBy[m.type]++;
       hud.toast(`MISSÃO CUMPRIDA  +${points}`, 2.5);
       events.push({ type: 'success' });
     } else {
@@ -162,7 +173,8 @@ export function createMissions({ scene, collision, layout, heatVision, hud }) {
     if (m.type === 'aneis') updateRings(dt, flight, prevPos, t);
     else if (m.type === 'resgate') updateRescue(dt, flight, t);
     else updateDrones(dt, flight, t);
-    hud.setMarkers(markers);
+    // A missão pode ter acabado neste quadro: end() já deixou só os marcadores de base.
+    if (m) hud.setMarkers(markers);
   }
 
   function updateRings(dt, flight, prevPos, t) {
@@ -249,6 +261,7 @@ export function createMissions({ scene, collision, layout, heatVision, hud }) {
     setBaseMarkers: (list) => { baseMarkers = list; },
     get score() { return score; },
     get done() { return done; },
+    get doneBy() { return doneBy; },
     get current() { return m; },
   };
 }
