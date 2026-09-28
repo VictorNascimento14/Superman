@@ -33,8 +33,10 @@ export function createCollisionWorld(boxes, cellSize = 64) {
   }
 
   // Empurra a esfera para fora dos prédios e do chão. Devolve true se tocou algo;
-  // `outNormal` recebe a soma das normais de contato (não normalizada).
-  function resolveSphere(p, r, outNormal) {
+  // `outNormal` recebe a soma das normais de contato (não normalizada). `onContact`, se
+  // vier, recebe cada normal unitária em separado: quem corta velocidade precisa delas uma
+  // a uma — chão + parede somados viram uma diagonal que joga o corpo para cima.
+  function resolveSphere(p, r, outNormal, onContact) {
     let hit = false;
     outNormal.x = outNormal.y = outNormal.z = 0;
     forEachNear(p.x - r, p.z - r, p.x + r, p.z + r, (b) => {
@@ -52,6 +54,7 @@ export function createCollisionWorld(boxes, cellSize = 64) {
         const push = (r - d) / d;
         p.x += dx * push; p.y += dy * push; p.z += dz * push;
         outNormal.x += dx / d; outNormal.y += dy / d; outNormal.z += dz / d;
+        onContact?.(dx / d, dy / d, dz / d);
         return;
       }
       // Centro dentro da caixa (túnel por velocidade alta): sai pela face mais próxima.
@@ -65,10 +68,12 @@ export function createCollisionWorld(boxes, cellSize = 64) {
       [, dx, dy, dz] = best;
       p.x += dx * best[0]; p.y += dy * best[0]; p.z += dz * best[0];
       outNormal.x += dx; outNormal.y += dy; outNormal.z += dz;
+      onContact?.(dx, dy, dz);
     });
     if (p.y < r) {
       p.y = r;
       outNormal.y += 1;
+      onContact?.(0, 1, 0);
       hit = true;
     }
     return hit;

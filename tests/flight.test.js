@@ -63,6 +63,18 @@ test('parede segura o herói e o impacto rápido é registrado', () => {
   assert.ok(f.events.some((e) => e.type === 'impact'));
 });
 
+test('bater num prédio voando rente ao chão não lança o herói para cima', () => {
+  // Chão e parede no mesmo subpasso: somar as normais dava a diagonal (0,71; 0,71), e o
+  // corte convertia metade da velocidade horizontal em subida — o herói escalava a parede.
+  const f = airborne();
+  f.pos.set(5, FLIGHT.radius, 60);
+  f.vel.set(0, 0, FLIGHT.cruise);
+  f.pitch = -0.1; // nariz levemente para baixo: fica raspando o chão
+  run(f, { ...idle, forward: 1 }, 1.5);
+  assert.ok(f.pos.z < 100 - FLIGHT.radius + 0.01, `atravessou: z = ${f.pos.z}`);
+  assert.ok(f.pos.y < 3, `lançado para cima: y = ${f.pos.y.toFixed(1)}, vy = ${f.vel.y.toFixed(1)}`);
+});
+
 test('descer devagar até o telhado pousa em cima dele', () => {
   const f = airborne(60);
   f.pos.set(5, 60, 105);
