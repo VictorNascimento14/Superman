@@ -2,77 +2,11 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { createRng } from '../core/rng.js';
 import { CITY, CELL, HALF, STYLES, QUAY, WATER_Y, LAWN, streetLine } from './layout.js';
-import { createTextures, FACADE_TILE, TILE_N } from './textures.js';
+import { createTextures, TILE_N } from './textures.js';
+import { GeoBuilder, addWalls, addTop, addBox, cutTier } from './buildingGeo.js';
 
 // Constrói os meshes da cidade a partir do layout. Invariante 1: geometria repetida é
 // mesclada por material ou instanciada — a cidade inteira sai em poucas dezenas de draw calls.
-
-class GeoBuilder {
-  constructor() {
-    this.pos = [];
-    this.nor = [];
-    this.uv = [];
-    this.col = [];
-    this.idx = [];
-    this.tint = [1, 1, 1];
-  }
-
-  // Cantos na ordem BL, BR, TR, TL vistos de fora (anti-horário).
-  quad(a, b, c, d, n, uv) {
-    const base = this.pos.length / 3;
-    for (const p of [a, b, c, d]) this.pos.push(p[0], p[1], p[2]);
-    for (let k = 0; k < 4; k++) this.nor.push(n[0], n[1], n[2]);
-    this.uv.push(...uv);
-    for (let k = 0; k < 4; k++) this.col.push(this.tint[0], this.tint[1], this.tint[2]);
-    this.idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
-  }
-
-  build() {
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 3));
-    g.setAttribute('normal', new THREE.Float32BufferAttribute(this.nor, 3));
-    g.setAttribute('uv', new THREE.Float32BufferAttribute(this.uv, 2));
-    g.setAttribute('color', new THREE.Float32BufferAttribute(this.col, 3));
-    g.setIndex(this.idx);
-    g.computeBoundingSphere();
-    return g;
-  }
-}
-
-// Paredes com UV em metros de fachada; `uo/vo` deslocam o padrão para cada prédio
-// não repetir as mesmas janelas acesas do vizinho.
-function addWalls(gb, x0, y0, z0, x1, y1, z1, uo, vo) {
-  const tw = FACADE_TILE.w;
-  const th = FACADE_TILE.h;
-  const v0 = y0 / th + vo;
-  const v1 = y1 / th + vo;
-  const w = x1 - x0;
-  const d = z1 - z0;
-  const faces = [
-    [[x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1], [0, 0, 1], w],
-    [[x1, y0, z0], [x0, y0, z0], [x0, y1, z0], [x1, y1, z0], [0, 0, -1], w],
-    [[x1, y0, z1], [x1, y0, z0], [x1, y1, z0], [x1, y1, z1], [1, 0, 0], d],
-    [[x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0], [-1, 0, 0], d],
-  ];
-  for (const [a, b, c, e, n, len] of faces) {
-    const u1 = uo + len / tw;
-    gb.quad(a, b, c, e, n, [uo, v0, u1, v0, u1, v1, uo, v1]);
-  }
-}
-
-function addTop(gb, x0, y, z0, x1, z1, scale) {
-  gb.quad([x0, y, z1], [x1, y, z1], [x1, y, z0], [x0, y, z0], [0, 1, 0],
-    [x0 / scale, z1 / scale, x1 / scale, z1 / scale, x1 / scale, z0 / scale, x0 / scale, z0 / scale]);
-}
-
-function addBox(gb, x0, y0, z0, x1, y1, z1, scale = 4, top = true) {
-  const u = (a) => a / scale;
-  gb.quad([x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1], [0, 0, 1], [u(x0), u(y0), u(x1), u(y0), u(x1), u(y1), u(x0), u(y1)]);
-  gb.quad([x1, y0, z0], [x0, y0, z0], [x0, y1, z0], [x1, y1, z0], [0, 0, -1], [u(x1), u(y0), u(x0), u(y0), u(x0), u(y1), u(x1), u(y1)]);
-  gb.quad([x1, y0, z1], [x1, y0, z0], [x1, y1, z0], [x1, y1, z1], [1, 0, 0], [u(z1), u(y0), u(z0), u(y0), u(z0), u(y1), u(z1), u(y1)]);
-  gb.quad([x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0], [-1, 0, 0], [u(z0), u(y0), u(z1), u(y0), u(z1), u(y1), u(z0), u(y1)]);
-  if (top) addTop(gb, x0, y1, z0, x1, z1, scale);
-}
 
 function shadowed(mesh, cast = true) {
   mesh.castShadow = cast;
@@ -92,6 +26,9 @@ export function createCity(scene, layout, renderer) {
   const roofs = new GeoBuilder();
   const trims = new GeoBuilder();
   const tint = new THREE.Color();
+  // Por prédio: estilo, deslocamento das janelas, tom e, por nível, o primeiro vértice dele
+  // em cada malha mesclada — o desabamento corta só essas faixas.
+  const refs = [];
   for (const b of layout.buildings) {
     const uo = rng.int(0, TILE_N - 1) / TILE_N;
     const vo = rng.int(0, TILE_N - 1) / TILE_N;
@@ -101,22 +38,19 @@ export function createCity(scene, layout, renderer) {
     else tint.setHSL(rng.range(0.05, 0.12), rng.range(0, 0.25), rng.range(0.5, 0.82));
     if (b.landmark) tint.setRGB(1, 1, 1);
     walls[b.style].tint = [tint.r, tint.g, tint.b];
+    const ref = { style: b.style, uo, vo, tint: [tint.r, tint.g, tint.b], tiers: [] };
     for (const t of b.tiers) {
-      const x0 = t.x - t.w / 2;
-      const x1 = t.x + t.w / 2;
-      const z0 = t.z - t.d / 2;
-      const z1 = t.z + t.d / 2;
-      addWalls(walls[b.style], x0, t.y0, z0, x1, t.y1, z1, uo, vo);
-      addTop(roofs, x0, t.y1, z0, x1, z1, 10);
-      if (b.style !== 'vidro') {
-        // Cornija: faixa saliente no topo de cada nível, sem tampa (a tampa cobriria o
-        // telhado inteiro com a cor da pedra). Vista de cima, lê como parapeito.
-        const o = 0.6;
-        addBox(trims, x0 - o, t.y1 - 1.4, z0 - o, x1 + o, t.y1 + 0.9, z1 + o, 4, false);
-      }
+      const wall = walls[b.style].pos.length / 3;
+      const roof = roofs.pos.length / 3;
+      const trim = b.style !== 'vidro' ? trims.pos.length / 3 : -1;
+      addTier(walls[b.style], roofs, trim >= 0 ? trims : null, t, uo, vo);
+      ref.tiers.push({ x: t.x, z: t.z, w: t.w, d: t.d, y0: t.y0, y1: t.y1, wall, roof, trim });
     }
+    refs.push(ref);
   }
   const windowMats = [];
+  const matByStyle = {};
+  const wallGeos = {};
   for (const s of STYLES) {
     const f = tex.facades[s];
     const m = new THREE.MeshStandardMaterial({
@@ -124,10 +58,62 @@ export function createCity(scene, layout, renderer) {
       roughnessMap: f.rmMap, metalnessMap: f.rmMap, roughness: 1, metalness: 1, vertexColors: true,
     });
     windowMats.push(m);
-    group.add(shadowed(new THREE.Mesh(walls[s].build(), m)));
+    matByStyle[s] = m;
+    wallGeos[s] = walls[s].build();
+    group.add(shadowed(new THREE.Mesh(wallGeos[s], m)));
   }
-  group.add(shadowed(new THREE.Mesh(roofs.build(), new THREE.MeshStandardMaterial({ map: tex.roof, roughness: 0.95 })), false));
-  group.add(shadowed(new THREE.Mesh(trims.build(), new THREE.MeshStandardMaterial({ color: 0xb9ad96, roughness: 0.8 }))));
+  const roofMat = new THREE.MeshStandardMaterial({ map: tex.roof, roughness: 0.95 });
+  const trimMat = new THREE.MeshStandardMaterial({ color: 0xb9ad96, roughness: 0.8 });
+  const roofGeo = roofs.build();
+  const trimGeo = trims.build();
+  group.add(shadowed(new THREE.Mesh(roofGeo, roofMat), false));
+  group.add(shadowed(new THREE.Mesh(trimGeo, trimMat)));
+  const cutArrays = Object.fromEntries(STYLES.map((s) => [s, {
+    wallPos: wallGeos[s].attributes.position.array, wallUv: wallGeos[s].attributes.uv.array,
+    roofPos: roofGeo.attributes.position.array, trimPos: trimGeo.attributes.position.array,
+  }]));
+  const dirty = (attr, start, count) => {
+    attr.addUpdateRange(start, count);
+    attr.needsUpdate = true;
+  };
+
+  // Encurta o prédio `bi` até a altura y, no lugar (desabamento). Só as faixas de vértices
+  // dele sobem para a GPU.
+  function setTop(bi, y) {
+    const r = refs[bi];
+    const wg = wallGeos[r.style];
+    for (const t of r.tiers) {
+      if (!cutTier(cutArrays[r.style], t, t, y, r.vo)) continue;
+      dirty(wg.attributes.position, t.wall * 3, 48);
+      dirty(wg.attributes.uv, t.wall * 2, 32);
+      dirty(roofGeo.attributes.position, t.roof * 3, 12);
+      if (t.trim >= 0) dirty(trimGeo.attributes.position, t.trim * 3, 48);
+    }
+  }
+
+  // A parte do prédio acima de yFrom, idêntica à original (mesmas janelas, mesmo tom), com a
+  // origem no centro da base do corte: é ela que despenca. Montada com y absoluto para o v
+  // da textura bater, e depois transladada.
+  function makePart(bi, yFrom) {
+    const r = refs[bi];
+    const b = layout.buildings[bi];
+    const gw = new GeoBuilder();
+    const gr = new GeoBuilder();
+    const gt = new GeoBuilder();
+    gw.tint = r.tint;
+    for (const t of r.tiers) {
+      if (t.y1 > yFrom) addTier(gw, gr, t.trim >= 0 ? gt : null, { ...t, y0: Math.max(t.y0, yFrom) }, r.uo, r.vo);
+    }
+    const part = new THREE.Group();
+    part.position.set(b.x, yFrom, b.z);
+    for (const [g, m] of [[gw, matByStyle[r.style]], [gr, roofMat], [gt, trimMat]]) {
+      if (!g.pos.length) continue;
+      const geo = g.build();
+      geo.translate(-b.x, -yFrom, -b.z);
+      part.add(shadowed(new THREE.Mesh(geo, m)));
+    }
+    return part;
+  }
 
   // --- Chão: uma laje grossa (a borda vira o cais) com a textura de ruas repetida por célula.
   const size = HALF * 2 + QUAY * 2;
@@ -171,7 +157,8 @@ export function createCity(scene, layout, renderer) {
 
   // --- Objetos de telhado: caixas d'água, condensadoras, antenas com luz de aviso.
   const beaconMat = new THREE.MeshStandardMaterial({ color: 0x330000, emissive: 0xff2a1a, emissiveIntensity: 0 });
-  group.add(makeRoofProps(layout, rng, beaconMat));
+  const props = makeRoofProps(layout, rng, beaconMat);
+  group.add(props.group);
 
   // --- O Planeta Diário: letreiro nos quatro lados e o globo dourado.
   const signMat = new THREE.MeshStandardMaterial({ color: 0x111111, emissive: 0xffffff, emissiveMap: tex.sign, emissiveIntensity: 0.4, map: tex.sign });
@@ -188,7 +175,23 @@ export function createCity(scene, layout, renderer) {
     tex.waterNormals.offset.set(time * 0.004, time * 0.0025);
   }
 
-  return { group, update };
+  return { group, update, refs, setTop, makePart, roofProps: (bi) => props.byBuilding[bi] };
+}
+
+// Um nível de prédio: paredes, telhado e, fora o vidro, a cornija — faixa saliente no topo,
+// sem tampa (a tampa cobriria o telhado inteiro com a cor da pedra; vista de cima, lê como
+// parapeito).
+function addTier(walls, roofs, trims, t, uo, vo) {
+  const x0 = t.x - t.w / 2;
+  const x1 = t.x + t.w / 2;
+  const z0 = t.z - t.d / 2;
+  const z1 = t.z + t.d / 2;
+  addWalls(walls, x0, t.y0, z0, x1, t.y1, z1, uo, vo);
+  addTop(roofs, x0, t.y1, z0, x1, z1, 10);
+  if (trims) {
+    const o = 0.6;
+    addBox(trims, x0 - o, t.y1 - 1.4, z0 - o, x1 + o, t.y1 + 0.9, z1 + o, 4, false);
+  }
 }
 
 function makeTrees(p, rng, avoid) {
@@ -264,36 +267,41 @@ function makeRoofProps(layout, rng, beaconMat) {
   const masts = new THREE.InstancedMesh(mastGeo, new THREE.MeshStandardMaterial({ color: 0x8a8d90, roughness: 0.4, metalness: 0.8 }), 400);
   const beacons = new THREE.InstancedMesh(beaconGeo, beaconMat, 400);
   const counts = { t: 0, a: 0, m: 0 };
+  const byBuilding = layout.buildings.map(() => []);
   const m = new THREE.Matrix4();
   const q = new THREE.Quaternion();
   const v = new THREE.Vector3();
   const s = new THREE.Vector3(1, 1, 1);
   const spot = (t, margin) => v.set(t.x + rng.range(-1, 1) * (t.w / 2 - margin), t.y1, t.z + rng.range(-1, 1) * (t.d / 2 - margin));
-  for (const b of layout.buildings) {
-    if (b.landmark) continue;
+  layout.buildings.forEach((b, bi) => {
+    if (b.landmark) return;
     const top = b.tiers.at(-1);
-    if (top.w < 10 || top.d < 10) continue;
+    if (top.w < 10 || top.d < 10) return;
+    const mine = byBuilding[bi];
     if (b.h < 110 && (b.style === 'tijolo' || b.style === 'concreto') && rng.chance(0.45) && counts.t < tanks.count) {
+      mine.push({ mesh: tanks, i: counts.t });
       tanks.setMatrixAt(counts.t++, m.makeTranslation(spot(top, 4)));
     }
     for (let k = rng.int(0, 3); k > 0 && counts.a < acs.count; k--) {
       q.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, rng.int(0, 1) * Math.PI / 2);
+      mine.push({ mesh: acs, i: counts.a });
       acs.setMatrixAt(counts.a++, m.compose(spot(top, 3), q, s));
     }
     if (b.h > 120 && rng.chance(0.6) && counts.m < masts.count) {
       const h = rng.range(8, 28);
       spot(top, 4);
+      mine.push({ mesh: masts, i: counts.m }, { mesh: beacons, i: counts.m });
       masts.setMatrixAt(counts.m, m.compose(v, q.identity(), s.set(1, h, 1)));
       beacons.setMatrixAt(counts.m++, m.makeTranslation(v.x, v.y + h, v.z));
       s.set(1, 1, 1);
     }
-  }
+  });
   tanks.count = counts.t;
   acs.count = counts.a;
   masts.count = beacons.count = counts.m;
   const g = new THREE.Group();
   g.add(shadowed(tanks), shadowed(acs), shadowed(masts), beacons);
-  return g;
+  return { group: g, byBuilding };
 }
 
 function makeLandmark(b, signMat) {
