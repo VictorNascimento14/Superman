@@ -57,21 +57,29 @@ const audio = createAudio();
 input.onKey('KeyM', () => hud.toast(audio.toggleMute() ? 'SOM DESLIGADO' : 'SOM LIGADO', 1));
 
 let paused = true;
-const start = () => {
-  audio.start();
+const resume = () => {
   overlay.hide();
   hud.show();
   paused = false;
 };
+// Autopiloto e e2e começam direto, sem pointer lock.
+const start = () => {
+  audio.start();
+  resume();
+};
 const overlay = createOverlay(() => {
-  input.lock();
-  start();
+  audio.start(); // no clique: o navegador só libera o som com gesto do usuário
+  // Despausa quando o lock pega de fato (pointerlockchange). O Chrome recusa o relock por
+  // ~1 s depois de sair com Esc; aí o overlay continua e o próximo clique tenta de novo.
+  if (!input.lock()) resume(); // navegador sem pointer lock: joga só com o teclado
 });
 document.addEventListener('pointerlockchange', () => {
-  if (!input.locked() && !debug.autopilot) {
+  if (input.locked()) resume();
+  else if (!debug.autopilot) {
     paused = true;
     hud.hide();
     overlay.show();
+    audio.suspend(); // aba em segundo plano para o loop: o som ficaria no último ganho
   }
 });
 

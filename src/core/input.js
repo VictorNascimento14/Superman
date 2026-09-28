@@ -13,6 +13,7 @@ const BIND = {
 
 export function createInput(target) {
   const down = new Set();
+  const mouse = new Set();
   const handlers = new Map();
   let jump = false;
   let dx = 0;
@@ -22,25 +23,35 @@ export function createInput(target) {
   window.addEventListener('keydown', (e) => {
     if (e.repeat) return;
     down.add(e.code);
-    if (e.code === 'Space') jump = true;
+    // Só com o jogo rodando: armado na pausa, o pulo decolava sozinho ao voltar.
+    if (e.code === 'Space' && document.pointerLockElement === target) jump = true;
     handlers.get(e.code)?.forEach((fn) => fn(e));
     if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
   });
   window.addEventListener('keyup', (e) => down.delete(e.code));
-  window.addEventListener('blur', () => down.clear()); // tecla presa ao trocar de janela
+  // Trocar de janela engole o keyup/mouseup: tecla ou botão (visão de calor) ficariam presos.
+  window.addEventListener('blur', () => {
+    down.clear();
+    mouse.clear();
+  });
   document.addEventListener('mousemove', (e) => {
     if (document.pointerLockElement !== target) return;
     dx += e.movementX;
     dy += e.movementY;
   });
-  const mouse = new Set();
   target.addEventListener('mousedown', (e) => mouse.add(e.button));
   window.addEventListener('mouseup', (e) => mouse.delete(e.button));
   target.addEventListener('contextmenu', (e) => e.preventDefault());
 
   return {
     locked: () => document.pointerLockElement === target,
-    lock: () => target.requestPointerLock?.(),
+    // true se pediu o lock (a resposta chega no pointerlockchange); false se o navegador não
+    // tem pointer lock. A recusa (relock logo após o Esc) não vira erro no console.
+    lock() {
+      if (!target.requestPointerLock) return false;
+      Promise.resolve(target.requestPointerLock()).catch(() => {});
+      return true;
+    },
     onKey(code, fn) {
       if (!handlers.has(code)) handlers.set(code, []);
       handlers.get(code).push(fn);
