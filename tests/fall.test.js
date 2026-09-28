@@ -52,3 +52,10 @@ test('queda: o lado do tombo segue a direção do golpe', () => {
   run(f, FALL.breakAt - 0.1);
   assert.ok(f.segs[2].pos.z < -5 && Math.abs(f.segs[2].pos.x) < 1e-6);
 });
+
+test('queda: corte limpo (visão de calor) não esmaga o toco, só tomba e escorrega para fora', () => {
+  const f = createFall(block(three), fixed, { crushG: 0, tiltAccel: 1.1 });
+  run(f, FALL.breakAt - 0.1);
+  assert.equal(f.crushY, 30, 'o toco fica na altura do corte');
+  assert.ok(f.tilt > 0.5, `tombou só ${f.tilt.toFixed(2)} rad`);
+});

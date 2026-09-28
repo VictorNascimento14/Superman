@@ -134,6 +134,61 @@ try {
   await page.screenshot({ path: `${OUT}/ceder.png` });
   console.log(`ceder: prédio de ${cede.width.toFixed(0)} m a 150 m/s desabou ${cede.collapsed}; andares cederam em ${cede.ceded} furos`);
   if (cede.collapsed || cede.ceded < 1) { console.error('Ceder em volta do furo falhou.'); failed = true; }
+  // Visão de calor: parado na rua de frente para uma fachada, varrendo a mira de um lado ao
+  // outro, o prédio é fatiado e a parte de cima cai; com a mira parada num ponto, estoura furo.
+  await page.evaluate(() => {
+    window.__facing = (skipCollapsed = true) => {
+      const g = window.__game;
+      const hit = {};
+      for (const [bi, b] of g.layout.buildings.entries()) {
+        if (b.landmark || b.h < 70 || (skipCollapsed && (g.collapses.isCollapsed(bi) || g.collapses.damageAt(bi, 30) > 0))) continue;
+        const t = b.tiers[0];
+        for (const [nx, nz, yaw] of [[0, -1, 0], [0, 1, Math.PI], [-1, 0, Math.PI / 2], [1, 0, -Math.PI / 2]]) {
+          const width = nx ? t.d : t.w;
+          if (width < 25 || width > 40) continue;
+          const start = nx ? { x: t.x + nx * (t.w / 2 + 11), y: 30, z: t.z } : { x: t.x, y: 30, z: t.z + nz * (t.d / 2 + 11) };
+          if (g.collision.heightAt(start.x, start.z) > 0.01) continue;
+          if (!g.collision.raycast(start, { x: -nx, y: 0, z: -nz }, 20, hit) || g.collision.boxes[hit.box].building !== bi) continue;
+          g.autopilot({});
+          g.solar.charge = 0;
+          g.flight.mode = 'air';
+          g.flight.pos.set(start.x, start.y, start.z);
+          g.flight.vel.set(0, 0, 0);
+          g.flight.yaw = yaw;
+          g.flight.pitch = 0.08;
+          return { bi, width, yaw };
+        }
+      }
+      return null;
+    };
+  });
+  const cutRun = await page.evaluate(() => new Promise((resolve) => {
+    const g = window.__game;
+    const f = window.__facing();
+    g.heat(true);
+    const t0 = performance.now();
+    const id = setInterval(() => {
+      const k = Math.min(1, (performance.now() - t0) / 2400);
+      g.flight.yaw = f.yaw + (k - 0.5) * 2.2;
+      if (k < 1) return;
+      clearInterval(id);
+      g.heat(false);
+      setTimeout(() => resolve({ width: f.width, sliced: g.collapses.isCollapsed(f.bi) }), 500);
+    }, 16);
+  }));
+  await page.screenshot({ path: `${OUT}/cortar.png` });
+  const breakRun = await page.evaluate(() => new Promise((resolve) => {
+    const g = window.__game;
+    const f = window.__facing();
+    const before = g.destruction.stats().breaches;
+    g.heat(true);
+    setTimeout(() => {
+      g.heat(false);
+      resolve({ width: f.width, blasts: g.destruction.stats().breaches - before });
+    }, 1000);
+  }));
+  console.log(`visão de calor: varrendo a fachada de ${cutRun.width.toFixed(0)} m, fatiou ${cutRun.sliced}; parada 1 s num ponto, ${breakRun.blasts} furo(s)`);
+  if (!cutRun.sliced || breakRun.blasts < 1) { console.error('Visão de calor cortando e quebrando falhou.'); failed = true; }
   // Origem flutuante: a 5·10⁸ m da cidade, a câmera fica perto da origem de render (a GPU
   // trabalha em float32) e nada quebra.
   const far = await page.evaluate(() => new Promise((resolve) => {

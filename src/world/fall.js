@@ -19,8 +19,10 @@ export const FALL = {
 const UP = new Vector3(0, 1, 0);
 
 // block: { x, z, base (altura do corte), width, depth, dir (unitário, horizontal),
-// segments: [{ y0, y1 }] em altura absoluta, de baixo para cima }.
-export function createFall(block, rnd = Math.random) {
+// segments: [{ y0, y1 }] em altura absoluta, de baixo para cima }. `opts` troca a descida e o
+// tombo: num corte limpo (a visão de calor), os andares de baixo estão inteiros — o bloco não
+// desce esmagando, só tomba sobre a borda do corte e escorrega para fora.
+export function createFall(block, rnd = Math.random, { crushG = FALL.crushG, tiltAccel = FALL.tiltAccel } = {}) {
   const dir = new Vector3(block.dir.x, 0, block.dir.z).normalize();
   const axis = new Vector3().crossVectors(UP, dir).normalize(); // tombar para `dir`
   // Borda da base do lado do golpe: a dobradiça do tombo.
@@ -70,9 +72,9 @@ export function createFall(block, rnd = Math.random) {
   f.step = (dt, groundAt) => {
     f.t += dt;
     if (!f.broken) {
-      f.tiltV += FALL.tiltAccel * (1 + f.tilt * 2) * dt;
+      f.tiltV += tiltAccel * (1 + f.tilt * 2) * dt;
       f.tilt = Math.min(FALL.maxTilt, f.tilt + f.tiltV * dt);
-      f.dropV += FALL.crushG * dt;
+      f.dropV += crushG * dt;
       f.drop += f.dropV * dt;
       for (const s of segs) s.prev.copy(s.pos);
       rigid();
