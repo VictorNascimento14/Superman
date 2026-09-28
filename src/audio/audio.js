@@ -148,6 +148,8 @@ export function createAudio() {
     },
     sonicBoom: () => burst({ lp: 1400, sweepTo: 60, peak: 0.9, decay: 1.4, thump: 70 }),
     impact: (k) => burst({ lp: 600, sweepTo: 60, peak: 0.3 + 0.5 * k, decay: 0.5, thump: 55 }),
+    // Explosão no impacto: estrondo grave e longo, maior com a força do golpe.
+    explosion: (k) => burst({ lp: 900, sweepTo: 38, peak: 0.45 + 0.55 * k, decay: 1.4 + 1.2 * k, thump: 42 }),
     explosion: () => burst({ lp: 1200, sweepTo: 100, peak: 0.7, decay: 0.9, thump: 60 }),
     // Parede cedendo: estalo seco na entrada, estrondo mais longo e grave na saída (entulho).
     // Prédio inteiro despencando: ronco grave e longo.

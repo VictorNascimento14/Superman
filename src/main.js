@@ -19,11 +19,12 @@ import { createChaseCamera } from './player/camera.js';
 import { createInput } from './core/input.js';
 import { createShockwaves } from './fx/shockwave.js';
 import { createBreachFx } from './fx/breach.js';
+import { createExplosions } from './fx/explosion.js';
 import { createCollapses } from './world/collapse.js';
 import { createOverlay } from './ui/overlay.js';
 import { createHud } from './ui/hud.js';
 import { createHeatVision } from './powers/heatvision.js';
-import { createSolar, solarFlux } from './powers/solar.js';
+import { createSolar, solarFlux, SOLAR } from './powers/solar.js';
 import { createPierce } from './powers/pierce.js';
 import { createMissions } from './game/missions.js';
 import { createAudio } from './audio/audio.js';
@@ -89,6 +90,8 @@ const hero = createHero(world);
 const shockwaves = createShockwaves(world);
 const breachFx = createBreachFx(world, openings);
 const interiors = createInteriors(world, layout, openings, city);
+const explosions = createExplosions(world);
+const blastAt = new THREE.Vector3();
 let insideBi = -1; // o último prédio em que o herói entrou
 // Quebrar uma peça do interior: quantos pedaços e de que tamanho, por tipo.
 const SMASH_BITS = { column: [6, 0.8], core: [5, 1], wall: [4, 0.8], desk: [3, 0.6], cabinet: [3, 0.6], light: [2, 0.4] };
@@ -184,7 +187,7 @@ const timer = new THREE.Timer();
 timer.connect(document);
 renderer.info.autoReset = false; // o pós faz vários render(); conta o quadro inteiro
 let elapsed = 0;
-const debug = { autopilot: null, cam: null, heat: false };
+const debug = { autopilot: null, cam: null, camAt: null, heat: false };
 
 renderer.setAnimationLoop(() => {
   timer.update();
@@ -224,6 +227,11 @@ renderer.setAnimationLoop(() => {
       const hole = breachFx.spawn(e);
       if (hole && interiors.isActive(bi)) openings.add(bi, hole);
       collapses.onBreach(e);
+      // Explosão: clarão, fogo e fumaça saindo da fachada, maiores quanto mais forte o golpe (a
+      // carga solar conta); na saída, maior.
+      const power = Math.min(1, (e.speed * (1 + SOLAR.force * solar.charge)) / 420);
+      explosions.blast(blastAt.copy(e.at).addScaledVector(e.normal, 3), e.normal, e.entry ? power * 0.8 : power);
+      audio.explosion(power);
       chase.shake(Math.min(1, e.speed / (e.entry ? 160 : 240)));
       audio.breach(Math.min(1, e.speed / 200), e.entry);
     } else if (e.type === 'impact') {
@@ -269,8 +277,13 @@ renderer.setAnimationLoop(() => {
   hero.update(dt, { pose: flight.pose, walk: flight.walk, velocity: flight.vel, t: elapsed });
   shockwaves.update(dt);
   breachFx.update(dt, camera, collision.heightAt, renderer.domElement.height);
+  explosions.update(dt, camera, renderer.domElement.height, sky.state.night);
 
-  if (debug.cam) {
+  if (debug.camAt) {
+    // Câmera parada num ponto, olhando outro (screenshots de fora).
+    camera.position.copy(debug.camAt.pos);
+    camera.lookAt(world.localToWorld(lookAtV.copy(debug.camAt.target)));
+  } else if (debug.cam) {
     camera.position.copy(flight.pos).add(debug.cam);
     camera.lookAt(world.localToWorld(lookAtV.copy(flight.pos))); // lookAt quer espaço de render
   } else chase.update(dt, flight, heatVision.firing);
@@ -376,12 +389,15 @@ window.__game = {
   destruction: breachFx,
   interiors,
   openings,
+  explosions,
   collapses,
   space,
   audio,
   heat: (on) => { debug.heat = on; },
   autopilot: (m) => { debug.autopilot = m ? { forward: 0, right: 0, up: 0, boost: false, jump: false, ...m } : null; },
   camHero: (x, y, z) => { debug.cam = new THREE.Vector3(x, y, z); },
+  // Câmera parada em `pos` olhando `target` (referencial da cidade); null devolve a câmera.
+  camAt: (pos, target) => { debug.camAt = pos ? { pos: new THREE.Vector3().copy(pos), target: new THREE.Vector3().copy(target) } : null; },
   debugInfo: () => ({
     quality: qualityName, time: sky.state.name, calls: renderer.info.render.calls, tris: renderer.info.render.triangles,
     geometries: renderer.info.memory.geometries,
