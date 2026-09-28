@@ -194,17 +194,22 @@ function makeNoiseTex(rng, base, n, alpha, size = 256, aniso = 4) {
 }
 
 // Normal map de ondas: soma de senoides com períodos que dividem a textura (tileável).
-function makeWaterNormals(size = 256) {
+function makeWaterNormals(size = 512) {
   const [c, g] = makeCanvas(size, size);
   const img = g.createImageData(size, size);
-  const waves = [[3, 1, 0.8], [-2, 4, 0.5], [5, -3, 0.35], [-7, -5, 0.2], [11, 6, 0.12]];
+  // Frequências inteiras mantêm a textura tileável; muitas direções diferentes (e não
+  // só múltiplos da grade) evitam o "papel de bolinhas" que o brilho do sol revelava.
+  const waves = [
+    [3, 1, 0.8], [-2, 5, 0.6], [5, -3, 0.45], [-7, -4, 0.35], [1, -8, 0.3], [9, 5, 0.22], [-11, 3, 0.18],
+    [6, 11, 0.15], [-13, -7, 0.12], [15, -2, 0.1], [4, 17, 0.08], [-19, 9, 0.07], [21, 13, 0.05], [-8, -23, 0.05],
+  ];
   const hgt = (x, y) => waves.reduce((s, [a, b, amp]) => s + amp * Math.sin((2 * Math.PI * (a * x + b * y)) / size), 0);
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
       const dx = hgt(x + 1, y) - hgt(x - 1, y);
       const dy = hgt(x, y + 1) - hgt(x, y - 1);
-      const nx = -dx * 3;
-      const ny = -dy * 3;
+      const nx = -dx * 1.6;
+      const ny = -dy * 1.6;
       const l = Math.hypot(nx, ny, 1);
       const o = (y * size + x) * 4;
       img.data[o] = ((nx / l) * 0.5 + 0.5) * 255;

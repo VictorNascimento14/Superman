@@ -157,8 +157,8 @@ export function createCity(scene, layout, renderer) {
   group.add(makeTrees(p, rng, pond.position));
 
   // --- Água em volta da ilha.
-  tex.waterNormals.repeat.set(160, 160);
-  const waterMat = new THREE.MeshStandardMaterial({ color: 0x0d2c44, roughness: 0.06, metalness: 0.2, normalMap: tex.waterNormals, normalScale: new THREE.Vector2(0.35, 0.35) });
+  tex.waterNormals.repeat.set(70, 70);
+  const waterMat = new THREE.MeshStandardMaterial({ color: 0x0d2c44, roughness: 0.06, metalness: 0.2, normalMap: tex.waterNormals, normalScale: new THREE.Vector2(0.3, 0.3) });
   const water = new THREE.Mesh(new THREE.PlaneGeometry(14000, 14000), waterMat);
   water.rotation.x = -Math.PI / 2;
   water.position.y = -1.2;
