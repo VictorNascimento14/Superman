@@ -10,7 +10,7 @@ const ORDER = ['baixa', 'media', 'alta'];
 // ?q=baixa|media|alta força o preset; senão, média (ou baixa em tela de toque).
 export function pickQuality(search = globalThis.location?.search ?? '') {
   const q = new URLSearchParams(search).get('q');
-  if (q && QUALITY[q]) return q;
+  if (q && Object.hasOwn(QUALITY, q)) return q; // ?q=constructor não é preset
   const touch = globalThis.matchMedia?.('(pointer: coarse)').matches;
   return touch ? 'baixa' : 'media';
 }
