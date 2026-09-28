@@ -13,6 +13,7 @@ import { createInput } from './core/input.js';
 import { createShockwaves } from './fx/shockwave.js';
 import { createOverlay } from './ui/overlay.js';
 import { createHud } from './ui/hud.js';
+import { createHeatVision } from './powers/heatvision.js';
 
 const app = document.getElementById('app');
 const qualityName = pickQuality();
@@ -29,6 +30,7 @@ const collision = createCollisionWorld(collisionBoxes(layout));
 const city = createCity(scene, layout, renderer);
 const hero = createHero(scene);
 const shockwaves = createShockwaves(scene);
+const heatVision = createHeatVision(scene, hero, collision, camera);
 
 // Nasce na sacada do terceiro recuo do Planeta Diário, olhando para o centro.
 const planet = layout.buildings.find((b) => b.landmark);
@@ -81,7 +83,7 @@ const timer = new THREE.Timer();
 timer.connect(document);
 renderer.info.autoReset = false; // o pós faz vários render(); conta o quadro inteiro
 let elapsed = 0;
-const debug = { autopilot: null, cam: null };
+const debug = { autopilot: null, cam: null, heat: false };
 
 renderer.setAnimationLoop(() => {
   timer.update();
@@ -116,8 +118,12 @@ renderer.setAnimationLoop(() => {
   if (debug.cam) {
     camera.position.copy(flight.pos).add(debug.cam);
     camera.lookAt(flight.pos);
-  } else chase.update(dt, flight);
+  } else chase.update(dt, flight, heatVision.firing);
 
+  // A mira sai da câmera: atualizar depois dela. Botão direito ou F.
+  const wantsHeat = !paused && (input.mouseDown(2) || input.isDown('KeyF'));
+  heatVision.update(dt, wantsHeat || debug.heat);
+  hud.setEnergy(heatVision.energy.value);
   hud.update(dt, flight, collision.heightAt(flight.pos.x, flight.pos.z));
   sky.update(dt, flight.pos, elapsed);
   city.update(dt, elapsed, sky.state.night);
@@ -135,6 +141,8 @@ window.__game = {
   // Dirige o herói sem teclado: autopilot({ forward: 1, boost: true }) — null devolve o controle.
   start,
   hud,
+  heatVision,
+  heat: (on) => { debug.heat = on; },
   autopilot: (m) => { debug.autopilot = m ? { forward: 0, right: 0, up: 0, boost: false, jump: false, ...m } : null; },
   camHero: (x, y, z) => { debug.cam = new THREE.Vector3(x, y, z); },
   debugInfo: () => ({
