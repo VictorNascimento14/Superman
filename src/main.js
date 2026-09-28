@@ -12,6 +12,7 @@ import { createChaseCamera } from './player/camera.js';
 import { createInput } from './core/input.js';
 import { createShockwaves } from './fx/shockwave.js';
 import { createOverlay } from './ui/overlay.js';
+import { createHud } from './ui/hud.js';
 
 const app = document.getElementById('app');
 const qualityName = pickQuality();
@@ -38,15 +39,24 @@ const chase = createChaseCamera(camera, collision);
 const input = createInput(renderer.domElement);
 const move = { forward: 0, right: 0, up: 0, boost: false, jump: false };
 
+const hud = createHud(layout);
+hud.setMarkers([{ x: planet.x, z: planet.z, color: '#f2c230' }]);
+input.onKey('KeyH', () => hud.toggleHelp());
+
 let paused = true;
+const start = () => {
+  overlay.hide();
+  hud.show();
+  paused = false;
+};
 const overlay = createOverlay(() => {
   input.lock();
-  overlay.hide();
-  paused = false;
+  start();
 });
 document.addEventListener('pointerlockchange', () => {
   if (!input.locked() && !debug.autopilot) {
     paused = true;
+    hud.hide();
     overlay.show();
   }
 });
@@ -92,6 +102,7 @@ renderer.setAnimationLoop(() => {
     if (e.type === 'sonicboom') {
       shockwaves.spawn(e.at, flight.vel.clone().normalize());
       chase.shake(0.9);
+      hud.toast('BARREIRA DO SOM');
     } else if (e.type === 'impact') chase.shake(Math.min(1, e.speed / 200));
     else if (e.type === 'supersonic') chase.shake(0.3);
   }
@@ -107,6 +118,7 @@ renderer.setAnimationLoop(() => {
     camera.lookAt(flight.pos);
   } else chase.update(dt, flight);
 
+  hud.update(dt, flight, collision.heightAt(flight.pos.x, flight.pos.z));
   sky.update(dt, flight.pos, elapsed);
   city.update(dt, elapsed, sky.state.night);
   post.render(dt);
@@ -121,6 +133,8 @@ window.__game = {
   collision,
   setTime,
   // Dirige o herói sem teclado: autopilot({ forward: 1, boost: true }) — null devolve o controle.
+  start,
+  hud,
   autopilot: (m) => { debug.autopilot = m ? { forward: 0, right: 0, up: 0, boost: false, jump: false, ...m } : null; },
   camHero: (x, y, z) => { debug.cam = new THREE.Vector3(x, y, z); },
   debugInfo: () => ({
