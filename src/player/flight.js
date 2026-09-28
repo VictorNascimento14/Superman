@@ -56,29 +56,33 @@ export function createFlight(collision, spawn) {
 
   const feetClearance = () => (s.mode === 'ground' ? FLIGHT.footDepth : FLIGHT.radius);
 
+  // Tira a componente da velocidade que entra em cada superfície tocada, uma de cada vez
+  // (ver resolveSphere): cortar contra a soma normalizada de chão + parede convertia
+  // metade da velocidade horizontal em subida.
+  let hitSpeed = 0;
+  const clip = (nx, ny, nz) => {
+    const into = s.vel.x * nx + s.vel.y * ny + s.vel.z * nz;
+    if (into >= 0) return;
+    hitSpeed = Math.max(hitSpeed, -into);
+    s.vel.x -= nx * into;
+    s.vel.y -= ny * into;
+    s.vel.z -= nz * into;
+  };
+
   function move(dt) {
     // Subdivide o passo para a esfera nunca andar mais que ~0,8 m sem checar parede.
     const dist = s.vel.length() * dt;
     const steps = Math.min(60, Math.max(1, Math.ceil(dist / 0.8)));
     step.copy(s.vel).multiplyScalar(dt / steps);
-    let hitSpeed = 0;
+    hitSpeed = 0;
     for (let i = 0; i < steps; i++) {
       s.pos.add(step);
       // Colide como esfera centrada na pélvis; em pé, a esfera "desce" até os pés.
       const lift = feetClearance() - FLIGHT.radius;
       s.pos.y -= lift;
-      const hit = collision.resolveSphere(s.pos, FLIGHT.radius, n);
+      const hit = collision.resolveSphere(s.pos, FLIGHT.radius, n, clip);
       s.pos.y += lift;
-      if (!hit) continue;
-      const len = n.length();
-      if (len < 1e-6) continue;
-      n.divideScalar(len);
-      const into = s.vel.dot(n);
-      if (into < 0) {
-        hitSpeed = Math.max(hitSpeed, -into);
-        s.vel.addScaledVector(n, -into); // tira a componente que entra na superfície
-        step.copy(s.vel).multiplyScalar(dt / steps);
-      }
+      if (hit) step.copy(s.vel).multiplyScalar(dt / steps);
     }
     if (hitSpeed > FLIGHT.impactSpeed) s.events.push({ type: 'impact', speed: hitSpeed, at: s.pos.clone() });
   }
