@@ -202,10 +202,85 @@ try {
   const plain = (6 / charged.width) * (1 + 150 / 200);
   console.log(`carga solar: cheia em ${charge.s.toFixed(1)} s rente ao Sol; na cidade ${Math.round(charged.before * 100)}%, a 150 m/s derrubou o prédio de ${charged.width.toFixed(0)} m: ${charged.collapsed} (sem carga, dano ${plain.toFixed(2)})`);
   if (charge.charge < 1 || charged.before < 0.9 || !charged.collapsed) { console.error('Carga solar falhou.'); failed = true; }
+  // Visão de calor carregada atravessa a Terra: do Sol, com a mira 1,5° ao lado da Terra (a
+  // assistência leva ao centro), 2,5 s de disparo abrem um buraco que entra de um lado e sai nos
+  // antípodas. Mirando Metrópolis, o raio para na superfície e não abre buraco.
+  await page.evaluate(() => {
+    const g = window.__game;
+    // Mira pela câmera (a mira do HUD): a câmera de ombro olha uns graus abaixo do rumo.
+    window.__aimCam = (q, offDeg = 0) => {
+      const d = g.camera.getWorldDirection(g.camera.position.clone());
+      const p = g.flight.pos;
+      const dx = q.x - p.x;
+      const dy = q.y - p.y;
+      const dz = q.z - p.z;
+      g.flight.yaw += Math.atan2(dx, dz) + (offDeg * Math.PI) / 180 - Math.atan2(d.x, d.z);
+      g.flight.pitch += Math.asin(dy / Math.hypot(dx, dy, dz)) - Math.asin(d.y);
+    };
+  });
+  const aimSteady = async (q, offDeg) => {
+    for (let k = 0; k < 3; k++) {
+      await new Promise((r) => setTimeout(r, 400));
+      await page.evaluate((q, offDeg) => window.__aimCam(q, offDeg), q, offDeg);
+    }
+  };
+  const earthC = { x: 0, y: -6.371e6, z: 0 };
+  await page.evaluate(() => {
+    const g = window.__game;
+    const sun = g.flight.bodies[1];
+    const e = { x: 0, y: -6.371e6, z: 0 };
+    const u = { x: e.x - sun.x, y: e.y - sun.y, z: e.z - sun.z };
+    const l = Math.hypot(u.x, u.y, u.z);
+    const k = sun.radius + 8e7;
+    g.autopilot({}); // parado: o lançamento do cenário anterior ainda voava para a frente
+    g.flight.mode = 'air';
+    g.flight.vel.set(0, 0, 0);
+    g.flight.pos.set(sun.x + (u.x / l) * k, sun.y + (u.y / l) * k, sun.z + (u.z / l) * k);
+  });
+  await aimSteady(earthC, 1.5);
+  const pierced = await page.evaluate(() => new Promise((resolve) => {
+    const g = window.__game;
+    g.heat(true);
+    setTimeout(() => {
+      g.heat(false);
+      const h = g.pierce.holes[0];
+      resolve({ holes: g.pierce.holes.length, radius: h?.radius ?? 0, dot: h ? h.entry.x * h.exit.x + h.entry.y * h.exit.y + h.entry.z * h.exit.z : 1, charge: g.solar.charge });
+    }, 2500);
+  }));
+  await page.screenshot({ path: `${OUT}/atravessa-sol.png` });
+  await page.evaluate(() => new Promise((resolve) => {
+    const g = window.__game;
+    const x = g.pierce.holes[0].exit;
+    const R = 6.371e6;
+    const r = R + 2.5e6;
+    g.flight.vel.set(0, 0, 0);
+    g.flight.pos.set(x.x * r + 1.5e6, -R + x.y * r, x.z * r);
+    const d = { x: x.x * R - g.flight.pos.x, y: -R + x.y * R - g.flight.pos.y, z: x.z * R - g.flight.pos.z };
+    g.flight.yaw = Math.atan2(d.x, d.z);
+    g.flight.pitch = Math.asin(d.y / Math.hypot(d.x, d.y, d.z));
+    setTimeout(resolve, 1500);
+  }));
+  await page.screenshot({ path: `${OUT}/buraco-saida.png` });
+  // A 1.000 km de Metrópolis, a 45° da vertical dela. O pitch do voo vai só até 83° (de cima da
+  // cidade a mira não chega nela), e ao começar a disparar a câmera vai para o ombro e a mira
+  // gira ~1°: de 14.000 km isso anda 300 km no chão, para fora do raio protegido; daqui, 30 km.
+  await page.evaluate(() => {
+    const g = window.__game;
+    g.flight.vel.set(0, 0, 0);
+    g.flight.pos.set(1e6, 1e6, 0);
+  });
+  await aimSteady({ x: 0, y: 0, z: 0 }, 0);
+  const city = await page.evaluate(() => new Promise((resolve) => {
+    const g = window.__game;
+    g.heat(true);
+    setTimeout(() => { g.heat(false); resolve({ holes: g.pierce.holes.length }); }, 1000);
+  }));
+  console.log(`atravessar a Terra: ${pierced.holes} buraco de ${Math.round(pierced.radius / 1000)} km, entrada·saída ${pierced.dot.toFixed(3)} (antípodas = −1); mirando Metrópolis, buracos ${city.holes}`);
+  if (pierced.holes !== 1 || pierced.radius < 100e3 || pierced.dot > -0.99 || city.holes !== 1) { console.error('Atravessar a Terra falhou.'); failed = true; }
   if (errors.length) { console.error('Erros no console:\n' + errors.join('\n')); failed = true; }
   const missing = Object.entries(state?.doneBy ?? { aneis: 0, resgate: 0, drones: 0 }).filter(([, n]) => !n).map(([k]) => k);
   if (missing.length) { console.error(`Sem vitória em ${LIMIT_S} s: ${missing.join(', ')}.`); failed = true; }
-  if (!failed) console.log(`OK — anéis, resgate e drones cumpridos (${state.score} pontos); prédio atravessado e derrubado; espaço, Sol e carga solar. Screenshots em ${OUT}/.`);
+  if (!failed) console.log(`OK — anéis, resgate e drones cumpridos (${state.score} pontos); prédio atravessado e derrubado; espaço, Sol, carga solar e a Terra atravessada. Screenshots em ${OUT}/.`);
 } finally {
   await browser.close();
   await new Promise((r) => server.httpServer.close(r));

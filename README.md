@@ -1,7 +1,10 @@
 # Superman — Metropolis Flight
 
 Jogo de voo em 3D que roda no navegador: o jogador é o Superman sobrevoando uma
-Metropolis procedural, com visão de calor, supervelocidade e resgates.
+Metropolis procedural, com visão de calor, supervelocidade e resgates. Voando rápido, ele
+atravessa e derruba prédios; subindo, sai da atmosfera para o sistema solar em escala real —
+a Terra, a Lua, os planetas e o Sol, onde se carrega de energia até a visão de calor
+atravessar a Terra.
 
 Feito com **Three.js** (WebGL2), **Vite** e geração procedural de cidade, modelos
 e texturas, sem nenhum asset binário baixado de terceiros.
@@ -16,7 +19,8 @@ e texturas, sem nenhum asset binário baixado de terceiros.
 **https://victornascimento14.github.io/Superman/** — publicado a cada merge na `main`.
 
 Clique para voar · mouse olha · W A S D voa · Espaço sobe · C desce · Shift acelera
-(segure para supervelocidade) · T troca a hora do dia · Esc pausa.
+(segure para supervelocidade; no espaço, hipervelocidade) · botão direito ou F dispara a
+visão de calor · T troca a hora do dia · M silencia · Esc pausa.
 
 ## Rodar
 

@@ -15,6 +15,8 @@ const STAR_R = PLACE * 16; // estrelas atrás de tudo
 const STARS = 6000;
 const CORONA = 5; // raio da casca da coroa, em raios do Sol
 const MIN_PX = 0.9; // raio aparente mínimo (px): um planeta a bilhões de km ainda é um ponto
+const HOLES = 16; // entradas e saídas dos buracos da visão de calor (8 buracos)
+const BEAM_W = 0.0012; // raio aparente (rad) do raio que atravessa a Terra
 
 // Distância no espaço escalado: igual até PLACE, depois logarítmica e presa antes das
 // estrelas. Preserva a ordem — é ela que decide quem passa na frente de quem.
@@ -70,6 +72,8 @@ const EARTH_FRAG = /* glsl */ `
   uniform vec3 cityX; // eixos x e z da cidade no globo: a ilha desenhada bate com a de verdade
   uniform vec3 cityZ;
   uniform vec4 park; // x0, z0, x1, z1 (m)
+  uniform vec4 holes[${HOLES}]; // buracos da visão de calor: direção (geo) e 1 − cos(raio)
+  uniform int holeCount;
   varying vec3 vGeo;
   varying vec3 vNormalW;
   varying vec3 vPosW;
@@ -127,6 +131,18 @@ const EARTH_FRAG = /* glsl */ `
       float towns = detail > 0.0 ? smoothstep(0.72, 0.9, noise(n * 900.0)) * 1.8 : 0.0;
       float lights = density * mix(0.35, towns, detail) + metro * 2.5;
       col += vec3(1.0, 0.68, 0.32) * lights * (1.0 - day) * (1.0 - c * 0.8) * 1.4;
+    }
+    // Buracos da visão de calor carregada: o túnel escuro com a parede em brasa, a borda
+    // derretida que brilha (também de noite) e o chão queimado em volta.
+    for (int i = 0; i < ${HOLES}; i++) {
+      if (i >= holeCount) break;
+      float t = sqrt(max(0.0, 1.0 - dot(n, holes[i].xyz)) / holes[i].w); // 0 no centro, 1 na borda
+      if (t > 3.0) continue;
+      float scorch = 1.0 - smoothstep(1.0, 3.0, t);
+      col *= 1.0 - 0.8 * scorch;
+      col += vec3(1.0, 0.22, 0.02) * pow(scorch, 3.0) * 0.6;
+      col = mix(col, mix(vec3(0.015, 0.0, 0.0), vec3(2.4, 0.55, 0.05), smoothstep(0.15, 0.95, t)), 1.0 - smoothstep(0.92, 1.0, t));
+      col += vec3(3.2, 1.7, 0.45) * smoothstep(0.6, 0.95, t) * (1.0 - smoothstep(0.95, 1.12, t));
     }
     // Borda da atmosfera por dentro do disco.
     float rim = pow(1.0 - max(dot(nw, vw), 0.0), 3.0);
@@ -299,6 +315,7 @@ export function createSpace({ park }) {
     cityX: { value: new THREE.Vector3(1, 0, 0).applyQuaternion(fromCity) },
     cityZ: { value: new THREE.Vector3(0, 0, 1).applyQuaternion(fromCity) },
     park: { value: new THREE.Vector4(park.x0, park.z0, park.x1, park.z1) },
+    holes: { value: Array.from({ length: HOLES }, () => new THREE.Vector4()) }, holeCount: { value: 0 },
   };
   const earth = new THREE.Mesh(new THREE.SphereGeometry(1, 160, 96), new THREE.ShaderMaterial({ uniforms, vertexShader: EARTH_VERT, fragmentShader: EARTH_FRAG }));
   earth.quaternion.copy(toCity);
@@ -345,6 +362,49 @@ export function createSpace({ park }) {
     }
     meshes[name] = mesh;
     scene.add(mesh);
+  }
+
+  // Raio da visão de calor que atravessa a Terra: do herói até a entrada, e da saída para além
+  // (dois raios da Terra). Um cone com a ponta no herói e um cilindro do raio proporcional à
+  // distância: a espessura aparente fica ~constante de perto a 1 UA.
+  const beamMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(9, 6.5, 3.5), blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, fog: false });
+  const along = (g) => g.rotateX(Math.PI / 2).translate(0, 0, 0.5); // eixo +z, de 0 a 1
+  const beamIn = new THREE.Mesh(along(new THREE.CylinderGeometry(BEAM_W, 0, 1, 12, 1, true)), beamMat);
+  const beamOut = new THREE.Mesh(along(new THREE.CylinderGeometry(1, 1, 1, 12, 1, true)), beamMat);
+  beamIn.frustumCulled = beamOut.frustumCulled = false;
+  beamIn.visible = beamOut.visible = false;
+  scene.add(beamIn, beamOut);
+  const beam = { on: false, through: false, from: new THREE.Vector3(), entry: new THREE.Vector3(), exit: new THREE.Vector3(), dir: new THREE.Vector3() };
+  const pa = new THREE.Vector3();
+  const pb = new THREE.Vector3();
+  // shot: o disparo do quadro (pierce.update) ou null; from: de onde o raio sai (a cabeça).
+  function setBeam(shot, from) {
+    beam.on = !!shot;
+    if (!shot) return;
+    beam.from.copy(from);
+    beam.entry.copy(shot.entry);
+    beam.through = !shot.blocked;
+    beam.exit.copy(shot.exit);
+    beam.dir.copy(shot.dir);
+  }
+  // Buracos (pierce.holes) no globo: entrada e saída, na orientação geográfica.
+  const hg = new THREE.Vector3();
+  function setHoles(list) {
+    const h = uniforms.holes.value;
+    for (let i = 0; i < list.length && 2 * i + 1 < HOLES; i++) {
+      const w = 1 - Math.cos(list[i].radius / EARTH.radius);
+      hg.copy(list[i].entry).applyQuaternion(fromCity);
+      h[2 * i].set(hg.x, hg.y, hg.z, w);
+      hg.copy(list[i].exit).applyQuaternion(fromCity);
+      h[2 * i + 1].set(hg.x, hg.y, hg.z, w);
+    }
+    uniforms.holeCount.value = Math.min(HOLES, 2 * list.length);
+  }
+  // Ponto verdadeiro → espaço escalado (relativo ao olho), como em place().
+  function mapPoint(p, out) {
+    out.set(p.x - eye.x, p.y - eye.y, p.z - eye.z);
+    const d = out.length();
+    return d > 0 ? out.multiplyScalar(mapDist(d) / d) : out;
   }
 
   // Estrelas no "infinito": presas à câmera do espaço, que só gira.
@@ -441,7 +501,24 @@ export function createSpace({ park }) {
       const mesh = meshes[bodies[i].name];
       if (mesh) place(mesh, bodies[i], bodies[i].radius, pixel);
     }
+    beamIn.visible = beam.on;
+    beamOut.visible = beam.on && beam.through;
+    if (beam.on) {
+      mapPoint(beam.from, pa);
+      mapPoint(beam.entry, pb);
+      beamIn.position.copy(pa);
+      beamIn.lookAt(pb);
+      beamIn.scale.setScalar(pa.distanceTo(pb));
+    }
+    if (beamOut.visible) {
+      mapPoint(beam.exit, pa);
+      mapPoint(rel.copy(beam.exit).addScaledVector(beam.dir, 2 * EARTH.radius), pb);
+      beamOut.position.copy(pa);
+      beamOut.lookAt(pb);
+      const r = pa.length() * BEAM_W;
+      beamOut.scale.set(r, r, pa.distanceTo(pb));
+    }
   }
 
-  return { scene, camera, update, setBodies, earth, sun, meshes };
+  return { scene, camera, update, setBodies, setBeam, setHoles, earth, sun, meshes };
 }
