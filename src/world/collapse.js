@@ -1,41 +1,52 @@
 import * as THREE from 'three';
 import { createDamage } from './damage.js';
+import { createFall } from './fall.js';
 
-// Desabamento. Quando o dano de um andar passa do limite (damage.js), a parte de cima
-// despenca sobre a de baixo e a esmaga até o chão, numa nuvem de poeira — como numa
-// demolição. O bloco que cai é uma cópia idêntica (city.makePart) e afunda sob a laje da rua,
-// que é opaca e o esconde; a parte de baixo é encurtada no lugar (city.setTop). No fim sobra
-// um toco com escombros.
-const FALL_G = 7; // m/s² efetivos: o esmagamento dos andares freia a queda livre
-const TILT_RATE = 0.035; // rad/s: o bloco tomba de leve enquanto cai...
-const MAX_TILT = 0.14; // ...até ~8°
+// Desabamento. Quando o dano de um andar passa do limite — ou o golpe tem força de
+// supersônico (damage.js) —, a parte de cima despenca: primeiro inteira, esmagando os andares
+// de baixo e tombando para o lado do golpe; depois se parte em segmentos que caem cada um por
+// si e se desfazem no chão (ou no telhado de um vizinho), levantando a poeira que corre pelas
+// ruas (fall.js). Cada segmento é uma cópia idêntica do trecho do prédio (city.makePart); a
+// parte de baixo é encurtada no lugar (city.setTop). No fim sobra um toco com escombros.
+// Golpe mais fraco não derruba: os andares em volta do furo cedem (evento 'cede').
 const RUBBLE = 3; // altura do toco que sobra (m)
 const GONE = -1e4; // caixa de nível que sumiu: debaixo da terra (altura zero seria uma placa no ar)
+const SEG = 30; // m por segmento (até MAX_SEG)
+const MAX_SEG = 5;
 const SIDES = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 
 export function createCollapses({ scene, city, layout, collision, fx, clearMarks }) {
   const damage = createDamage();
   const active = [];
-  const events = []; // { type: 'collapse' | 'rubble', at, height }: áudio, câmera e aviso
+  const cedes = []; // furos cujos andares em volta vão ceder daqui a pouco
+  const events = []; // { type: 'collapse' | 'break' | 'rubble' | 'cede', ... }: jogo, áudio, câmera
+  let ceded = 0;
   const m = new THREE.Matrix4();
   const delta = new THREE.Matrix4();
   const zero = new THREE.Matrix4().makeScale(0, 0, 0);
+  const off = new THREE.Vector3();
   const region = { minX: 0, minY: 0, minZ: 0, maxX: 0, maxY: 0, maxZ: 0 };
   // Caixas de colisão de cada prédio: o teto delas desce com o esmagamento.
   const boxesOf = layout.buildings.map(() => []);
   collision.boxes.forEach((b, i) => { if (b.breakable) boxesOf[b.building].push(i); });
 
   // Cada entrada de travessia é dano no andar em que o herói passou. O Planeta Diário fura,
-  // mas não cai: o globo e o letreiro não acompanhariam.
+  // mas não cai: o globo e o letreiro não acompanhariam. Furo que não derruba faz ceder.
   function onBreach(e) {
-    if (!e.entry) return;
     const box = collision.boxes[e.box];
     const bi = box.building;
     if (bi === undefined || layout.buildings[bi].landmark) return;
-    // Largura atravessada: a extensão do nível perpendicular ao caminho, na horizontal.
-    const width = Math.abs(e.dir.x) > Math.abs(e.dir.z) ? box.maxZ - box.minZ : box.maxX - box.minX;
-    const cut = damage.hit(bi, e.at.y, width, e.force ?? e.speed); // força: com a carga solar, maior
-    if (cut !== null) start(bi, Math.max(cut, RUBBLE));
+    if (e.entry) {
+      // Largura atravessada: a extensão do nível perpendicular ao caminho, na horizontal.
+      const width = Math.abs(e.dir.x) > Math.abs(e.dir.z) ? box.maxZ - box.minZ : box.maxX - box.minX;
+      const cut = damage.hit(bi, e.at.y, width, e.force ?? e.speed); // força: com a carga solar, maior
+      if (cut !== null) {
+        start(bi, Math.max(cut, RUBBLE), e.dir);
+        return;
+      }
+    }
+    if (damage.isCollapsed(bi)) return;
+    cedes.push({ bi, at: e.at.clone(), normal: e.normal.clone(), dir: e.dir.clone(), speed: e.speed, t: 0.3 + Math.random() * 0.35 });
   }
 
   // Pegada do prédio (todos os níveis, com folga para as marcas coladas na fachada).
@@ -62,26 +73,36 @@ export function createCollapses({ scene, city, layout, collision, fx, clearMarks
     }
   }
 
-  function start(bi, cut) {
+  function start(bi, cut, dir) {
     const b = layout.buildings[bi];
-    const part = city.makePart(bi, cut);
-    scene.add(part);
-    part.updateMatrixWorld();
+    const t0 = b.tiers[0];
+    const n = Math.min(MAX_SEG, Math.max(1, Math.round((b.h - cut) / SEG)));
+    const segments = Array.from({ length: n }, (_, i) => ({ y0: cut + ((b.h - cut) * i) / n, y1: cut + ((b.h - cut) * (i + 1)) / n }));
+    const parts = segments.map((s) => {
+      const part = city.makePart(bi, s.y0, s.y1);
+      scene.add(part);
+      return part;
+    });
+    const fall = createFall({ x: b.x, z: b.z, base: cut, width: t0.w, depth: t0.d, dir: dir ?? { x: Math.random() - 0.5, z: Math.random() - 0.5 }, segments });
     city.setTop(bi, cut);
     lowerBoxes(bi, cut);
-    // Os objetos de telhado caem junto com o bloco: guarda a matriz original de cada um.
+    // Os objetos de telhado caem com o segmento de cima: guarda a matriz original de cada um.
+    const top = parts[n - 1];
+    top.updateMatrixWorld();
     const props = (city.roofProps(bi) ?? []).map(({ mesh, i }) => {
       const m0 = new THREE.Matrix4();
       mesh.getMatrixAt(i, m0);
       return { mesh, i, m0 };
     });
     clearMarks(footprint(bi, cut));
-    const axis = new THREE.Vector3(Math.random() - 0.5, 0, Math.random() - 0.5).normalize();
-    active.push({ bi, cut, part, props, axis, baseInv: part.matrixWorld.clone().invert(), height: b.h - cut, v: 0, drop: 0, t: 0, puff: 0 });
+    const inside = { minX: t0.x - t0.w / 2 - 2, maxX: t0.x + t0.w / 2 + 2, minZ: t0.z - t0.d / 2 - 2, maxZ: t0.z + t0.d / 2 + 2 };
+    // O chão de um segmento: dentro da pegada do prédio é o toco; fora, a rua ou um vizinho.
+    const groundAt = (x, z) => (x > inside.minX && x < inside.maxX && z > inside.minZ && z < inside.maxZ ? RUBBLE : collision.heightAt(x, z));
+    active.push({ bi, cut, fall, parts, props, topInv: top.matrixWorld.clone().invert(), groundAt, puff: 0 });
     events.push({ type: 'collapse', building: bi, at: new THREE.Vector3(b.x, cut, b.z), height: b.h - cut });
   }
 
-  // Poeira e entulho saindo pelos lados na linha de esmagamento, mais forte quanto mais rápido.
+  // Poeira e entulho saindo pelos lados na linha de esmagamento.
   function crushFx(c, y) {
     const t = layout.buildings[c.bi].tiers[0];
     for (let k = 0; k < 2; k++) {
@@ -89,35 +110,79 @@ export function createCollapses({ scene, city, layout, collision, fx, clearMarks
       const u = Math.random() - 0.5;
       const x = t.x + nx * (t.w / 2 + 1) + (nz !== 0 ? u * t.w : 0);
       const z = t.z + nz * (t.d / 2 + 1) + (nx !== 0 ? u * t.d : 0);
-      fx.puff(x, y, z, nx * 4, 1, nz * 4, 22 + Math.random() * 14, 6, 0.7);
-      fx.burst(x, y, z, nx * (6 + c.v * 0.3), -2, nz * (6 + c.v * 0.3), 4, 3, 1.4);
+      fx.puff(x, y, z, nx * 5, 1, nz * 5, 24 + Math.random() * 14, 7, 0.75);
+      fx.burst(x, y, z, nx * 9, -2, nz * 9, 5, 3, 1.6);
     }
   }
 
-  function update(dt) {
-    for (let k = active.length - 1; k >= 0; k--) {
-      const c = active[k];
-      c.t += dt;
-      c.v += FALL_G * dt;
-      c.drop += c.v * dt;
-      const bottom = c.cut - c.drop; // base do bloco que cai
-      const crush = Math.max(RUBBLE, Math.min(c.cut, bottom));
-      city.setTop(c.bi, crush);
-      lowerBoxes(c.bi, crush);
-      c.part.position.y = bottom;
-      c.part.quaternion.setFromAxisAngle(c.axis, Math.min(MAX_TILT, c.t * TILT_RATE));
-      c.part.updateMatrixWorld();
-      delta.multiplyMatrices(c.part.matrixWorld, c.baseInv);
+  // Um segmento chegou ao chão: vira pedaços grandes e uma nuvem de poeira em anel, que corre
+  // pelas ruas e fica no ar.
+  function shatter(c, e) {
+    const part = c.parts[e.segment];
+    scene.remove(part);
+    part.traverse((o) => o.geometry?.dispose());
+    if (e.segment === c.parts.length - 1) {
       for (const p of c.props) {
-        p.mesh.setMatrixAt(p.i, m.multiplyMatrices(delta, p.m0));
+        p.mesh.setMatrixAt(p.i, zero);
         p.mesh.instanceMatrix.needsUpdate = true;
       }
-      if ((c.puff -= dt) <= 0 && bottom > RUBBLE - 2) {
+    }
+    const span = Math.max(e.size.x, e.size.z);
+    const vol = e.size.x * e.size.y * e.size.z * 8;
+    fx.burst(e.at.x, e.floor + 2, e.at.z, e.vel.x * 0.25, 3, e.vel.z * 0.25, Math.min(110, 30 + vol / 800), span * 1.2, 3.4);
+    for (let k = 0; k < 12; k++) {
+      const a = (k / 12) * Math.PI * 2 + Math.random() * 0.4;
+      const v = 9 + Math.random() * 7;
+      fx.puff(e.at.x + Math.cos(a) * span * 0.6, e.floor + 3, e.at.z + Math.sin(a) * span * 0.6, Math.cos(a) * v, 0.8, Math.sin(a) * v, 36 + Math.random() * 18, 14 + Math.random() * 6, 0.8);
+    }
+    events.push({ type: 'rubble', at: new THREE.Vector3(e.at.x, e.floor, e.at.z), height: e.size.y * 2 });
+  }
+
+  function update(dt) {
+    for (let k = cedes.length - 1; k >= 0; k--) {
+      const c = cedes[k];
+      if ((c.t -= dt) > 0) continue;
+      cedes.splice(k, 1);
+      if (damage.isCollapsed(c.bi)) continue;
+      // Os andares em volta do furo cedem: blocos grandes caindo para fora e poeira.
+      const r = 4 + 3 * Math.min(1, c.speed / 200);
+      fx.burst(c.at.x + c.normal.x * 1.5, c.at.y - 1, c.at.z + c.normal.z * 1.5, c.normal.x * 3, -1, c.normal.z * 3, Math.round(18 + 8 * r), r, 2.4);
+      for (let i = 0; i < 4; i++) fx.puff(c.at.x + c.normal.x * 3, c.at.y - 2 - i * 2, c.at.z + c.normal.z * 3, c.normal.x * 3, -0.5, c.normal.z * 3, 18 + Math.random() * 10, 7, 0.7);
+      ceded++;
+      events.push({ type: 'cede', building: c.bi, at: c.at, normal: c.normal, dir: c.dir, radius: r });
+    }
+    for (let k = active.length - 1; k >= 0; k--) {
+      const c = active[k];
+      const falling = c.fall.step(dt, c.groundAt);
+      for (let i = 0; i < c.parts.length; i++) {
+        const s = c.fall.segs[i];
+        if (s.gone) continue;
+        // A origem da parte é o centro da base do segmento; a queda anda com o centro dele.
+        c.parts[i].position.copy(s.pos).add(off.set(0, -s.half.y, 0).applyQuaternion(s.quat));
+        c.parts[i].quaternion.copy(s.quat);
+        c.parts[i].updateMatrixWorld();
+      }
+      const top = c.fall.segs[c.parts.length - 1];
+      if (!top.gone) {
+        delta.multiplyMatrices(c.parts[c.parts.length - 1].matrixWorld, c.topInv);
+        for (const p of c.props) {
+          p.mesh.setMatrixAt(p.i, m.multiplyMatrices(delta, p.m0));
+          p.mesh.instanceMatrix.needsUpdate = true;
+        }
+      }
+      for (const e of c.fall.events) {
+        if (e.type === 'ground') shatter(c, e);
+        else if (e.type === 'break') events.push({ type: 'break', building: c.bi, at: c.fall.segs[0].pos.clone() });
+      }
+      c.fall.events.length = 0;
+      const crush = Math.max(RUBBLE, Math.min(c.cut, c.fall.crushY));
+      city.setTop(c.bi, crush);
+      lowerBoxes(c.bi, crush);
+      if ((c.puff -= dt) <= 0 && crush > RUBBLE + 0.5) {
         c.puff = 0.12;
         crushFx(c, crush);
       }
-      // Fim quando o topo do bloco passou da rua: a laje opaca já o esconde.
-      if (bottom + c.height < 0) {
+      if (!falling && crush <= RUBBLE) {
         finish(c);
         active.splice(k, 1);
       }
@@ -125,19 +190,13 @@ export function createCollapses({ scene, city, layout, collision, fx, clearMarks
   }
 
   function finish(c) {
-    scene.remove(c.part);
-    c.part.traverse((o) => o.geometry?.dispose());
-    for (const p of c.props) {
-      p.mesh.setMatrixAt(p.i, zero);
-      p.mesh.instanceMatrix.needsUpdate = true;
-    }
     city.setTop(c.bi, RUBBLE);
     lowerBoxes(c.bi, RUBBLE);
     clearMarks(footprint(c.bi, RUBBLE));
-    // Escombros: pedaços grandes que assentam sobre o toco, e a poeira que fica pairando.
+    // Escombros sobre o toco, e a poeira que fica pairando.
     const t = layout.buildings[c.bi].tiers[0];
     fx.burst(t.x, RUBBLE + 2, t.z, 0, -1, 0, 70, Math.min(t.w, t.d) * 0.8, 2.6);
-    for (let i = 0; i < 6; i++) fx.puff(t.x + (Math.random() - 0.5) * t.w, 4, t.z + (Math.random() - 0.5) * t.d, 0, 0.5, 0, 35, 9, 0.75);
+    for (let i = 0; i < 6; i++) fx.puff(t.x + (Math.random() - 0.5) * t.w, 4, t.z + (Math.random() - 0.5) * t.d, 0, 0.5, 0, 35, 12, 0.75);
     events.push({ type: 'rubble', at: new THREE.Vector3(t.x, RUBBLE, t.z), height: 0 });
   }
 
@@ -148,5 +207,7 @@ export function createCollapses({ scene, city, layout, collision, fx, clearMarks
     isCollapsed: damage.isCollapsed,
     damageAt: damage.at,
     get active() { return active.length; },
+    get ceded() { return ceded; },
+    get segments() { return active.reduce((n, c) => n + c.fall.segs.filter((s) => !s.gone).length, 0); },
   };
 }

@@ -5,7 +5,7 @@ import { CITY } from './layout.js';
 // Interior dos prédios que o herói atravessa: as peças de interior.js em InstancedMesh (um
 // por tipo), só nos últimos ACTIVE prédios e só na faixa de andares em volta de onde ele
 // entrou. O que o herói toca quebra e vira entulho; o que quebrou continua quebrado.
-const CAP = { slab: 48, column: 2000, core: 600, wall: 1500, desk: 6000, cabinet: 300, light: 3600, inner: 96 };
+const CAP = { slab: 5000, column: 2000, core: 600, wall: 1500, desk: 6000, cabinet: 300, light: 3600, inner: 96 };
 const ACTIVE = 3;
 const BAND = 3; // andares acima e abaixo de onde o herói entrou
 const SOLID = new Set(['slab', 'inner']); // não quebram: a laje fica, e a fachada abre pelo furo
@@ -164,6 +164,38 @@ export function createInteriors(parent, layout, openings, city) {
     rebuild();
   }
 
+  // Quebra a peça i do prédio ativo a: some da tela (só aquela instância sobe) e fica marcada.
+  function breakPiece(a, i) {
+    const c = a.pieces[i];
+    a.alive[i] = 0;
+    if (!broken.has(a.bi)) broken.set(a.bi, new Set());
+    broken.get(a.bi).add(c.id);
+    brokenCount++;
+    const slot = a.slot[i];
+    if (slot >= 0) {
+      const mesh = meshes[c.kind];
+      mesh.setMatrixAt(slot, zero);
+      mesh.instanceMatrix.addUpdateRange(slot * 16, 16);
+      mesh.instanceMatrix.needsUpdate = true;
+    }
+    return c;
+  }
+
+  // Os andares em volta de um furo cedem: tudo do prédio `bi` na esfera (p, r) cai, laje
+  // incluída — só a fachada fica (ela abre pelo furo maior). Devolve o que caiu.
+  const fallen = [];
+  function collapseRegion(bi, p, r) {
+    fallen.length = 0;
+    const a = active.find((e) => e.bi === bi);
+    if (!a) return fallen;
+    piecesInSphere(a.pieces, p, r, hit);
+    for (let h = 0; h < hit.length; h++) {
+      const i = hit[h];
+      if (a.alive[i] && a.pieces[i].kind !== 'inner') fallen.push(breakPiece(a, i));
+    }
+    return fallen;
+  }
+
   // O herói (esfera de raio r) foi de `from` a `to` neste quadro: o que ele tocou quebra.
   // Devolve as peças quebradas (para o entulho), num array reaproveitado.
   const hit = [];
@@ -180,20 +212,8 @@ export function createInteriors(parent, layout, openings, city) {
         piecesInSphere(a.pieces, sample, r, hit);
         for (let h = 0; h < hit.length; h++) {
           const i = hit[h];
-          const c = a.pieces[i];
-          if (!a.alive[i] || SOLID.has(c.kind)) continue;
-          a.alive[i] = 0;
-          if (!broken.has(a.bi)) broken.set(a.bi, new Set());
-          broken.get(a.bi).add(c.id);
-          brokenCount++;
-          const slot = a.slot[i];
-          if (slot >= 0) {
-            const mesh = meshes[c.kind];
-            mesh.setMatrixAt(slot, zero);
-            mesh.instanceMatrix.addUpdateRange(slot * 16, 16);
-            mesh.instanceMatrix.needsUpdate = true;
-          }
-          smashed.push(c);
+          if (!a.alive[i] || SOLID.has(a.pieces[i].kind)) continue;
+          smashed.push(breakPiece(a, i));
         }
       }
     }
@@ -208,7 +228,7 @@ export function createInteriors(parent, layout, openings, city) {
   }
 
   return {
-    activate, remove, smash, update, meshes,
+    activate, remove, smash, collapseRegion, update, meshes,
     isActive: (bi) => active.some((a) => a.bi === bi),
     stats: () => ({ active: active.map((a) => a.bi), pieces: active.reduce((n, a) => n + a.pieces.length, 0), broken: brokenCount }),
   };

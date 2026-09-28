@@ -16,11 +16,28 @@ export const INTERIOR = {
   wall: 0.12, // divisória
   seg: 3, // m: paredes em segmentos, para quebrar um pedaço de cada vez
   light: 6, // m entre luminárias
+  tile: 6, // m: a laje vem em placas, para os andares em volta de um furo cederem em pedaços
 };
 export const KINDS = ['slab', 'column', 'core', 'wall', 'desk', 'cabinet', 'light', 'inner'];
 
 const F = CITY.floor;
-const SLAB_ID = 1 << 24; // ids de laje: SLAB_ID + altura em cm (a laje é do prédio, não do andar)
+const SLAB_ID = 1 << 24; // ids de laje: SLAB_ID + (altura em cm, placa) — a laje é do prédio, não do andar
+
+// Laje a `y` no nível `t`, em placas de INTERIOR.tile.
+function slab(out, t, y) {
+  const x0 = t.x - t.w / 2 + INTERIOR.skin;
+  const z0 = t.z - t.d / 2 + INTERIOR.skin;
+  const w = t.w - 2 * INTERIOR.skin;
+  const d = t.d - 2 * INTERIOR.skin;
+  const nx = Math.max(1, Math.round(w / INTERIOR.tile));
+  const nz = Math.max(1, Math.round(d / INTERIOR.tile));
+  for (let i = 0; i < nx; i++) {
+    for (let j = 0; j < nz; j++) {
+      const id = SLAB_ID + Math.round(y * 100) * 1024 + i * 32 + j;
+      push(out, 'slab', id, x0 + (w * i) / nx, y - INTERIOR.slab, z0 + (d * j) / nz, x0 + (w * (i + 1)) / nx, y, z0 + (d * (j + 1)) / nz);
+    }
+  }
+}
 
 function push(out, kind, id, x0, y0, z0, x1, y1, z1) {
   out.push({ kind, id, minX: Math.min(x0, x1), minY: Math.min(y0, y1), minZ: Math.min(z0, z1), maxX: Math.max(x0, x1), maxY: Math.max(y0, y1), maxZ: Math.max(z0, z1) });
@@ -144,9 +161,9 @@ export function interiorBand(b, yLo, yHi) {
     // Lajes: cada divisa de andar dentro do nível e a laje do topo (embaixo do telhado). A do
     // pé do nível é a de cima do nível de baixo, que é maior.
     for (let y = Math.ceil((t.y0 + 0.01) / F) * F; y < t.y1 - 0.01; y += F) {
-      if (y >= yLo && y <= yHi + F) push(out, 'slab', SLAB_ID + Math.round(y * 100), t.x - t.w / 2 + INTERIOR.skin, y - INTERIOR.slab, t.z - t.d / 2 + INTERIOR.skin, t.x + t.w / 2 - INTERIOR.skin, y, t.z + t.d / 2 - INTERIOR.skin);
+      if (y >= yLo && y <= yHi + F) slab(out, t, y);
     }
-    if (t.y1 >= yLo && t.y1 <= yHi + F) push(out, 'slab', SLAB_ID + Math.round(t.y1 * 100), t.x - t.w / 2 + INTERIOR.skin, t.y1 - INTERIOR.slab, t.z - t.d / 2 + INTERIOR.skin, t.x + t.w / 2 - INTERIOR.skin, t.y1, t.z + t.d / 2 - INTERIOR.skin);
+    if (t.y1 >= yLo && t.y1 <= yHi + F) slab(out, t, t.y1);
     // Andares cuja base cai no nível (e sobra pelo menos meio andar até o topo dele).
     for (let f = Math.ceil((t.y0 - 0.01) / F); f * F < t.y1 - F / 2; f++) {
       const yb = f * F;
