@@ -13,6 +13,11 @@ export const CITY = {
 };
 export const CELL = CITY.block + CITY.street;
 export const HALF = (CITY.blocks * CELL) / 2;
+// Chão, igual na cena e na colisão: a laje da ilha (topo em y = 0) passa QUAY m das ruas
+// da borda e vira o cais; o mar fica em WATER_Y; o gramado do parque sobe LAWN acima da rua.
+export const QUAY = 30;
+export const WATER_Y = -1.2;
+export const LAWN = 0.6;
 
 // Centro do centro financeiro (onde nascem os arranha-céus) e quarteirões especiais.
 export const DOWNTOWN = { x: -200, z: -120 };
@@ -154,5 +159,12 @@ export function collisionBoxes(layout) {
       boxes.push({ minX: g.x - r, minY: b.h, minZ: g.z - r, maxX: g.x + r, maxY: g.y + r, maxZ: g.z + r });
     }
   }
+  // Laje da ilha e gramado: sem elas o piso era o plano y = 0 em toda parte — pernas
+  // enterradas 0,6 m no parque e pouso 1,2 m acima da água. O piso infinito do mundo de
+  // colisão fica no nível do mar (main.js).
+  const s = HALF + QUAY;
+  boxes.push({ minX: -s, minY: -4, minZ: -s, maxX: s, maxY: 0, maxZ: s });
+  const p = layout.park;
+  boxes.push({ minX: p.x0, minY: 0, minZ: p.z0, maxX: p.x1, maxY: LAWN, maxZ: p.z1 });
   return boxes;
 }

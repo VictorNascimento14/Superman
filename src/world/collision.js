@@ -1,7 +1,8 @@
 // Mundo de colisão: AABBs num hash espacial 2D (x/z). Sem three, sem alocação no
 // caminho quente — os resultados saem em objetos que o chamador reaproveita.
 
-export function createCollisionWorld(boxes, cellSize = 64) {
+// `floor`: plano infinito sob tudo (y = floor) — no jogo, o nível do mar.
+export function createCollisionWorld(boxes, { cellSize = 64, floor = 0 } = {}) {
   const cells = new Map();
   const key = (ix, iz) => (ix + 2048) * 4096 + (iz + 2048);
   const cellOf = (v) => Math.floor(v / cellSize);
@@ -70,8 +71,8 @@ export function createCollisionWorld(boxes, cellSize = 64) {
       outNormal.x += dx; outNormal.y += dy; outNormal.z += dz;
       onContact?.(dx, dy, dz);
     });
-    if (p.y < r) {
-      p.y = r;
+    if (p.y < floor + r) {
+      p.y = floor + r;
       outNormal.y += 1;
       onContact?.(0, 1, 0);
       hit = true;
@@ -86,7 +87,7 @@ export function createCollisionWorld(boxes, cellSize = 64) {
     out.dist = maxDist;
     out.box = -1;
     if (dir.y < 0) {
-      const t = -o.y / dir.y;
+      const t = (floor - o.y) / dir.y;
       if (t >= 0 && t < out.dist) setHit(out, o, dir, t, 0, 1, 0, -1);
     }
     // Varre as células que o segmento cruza em passos de meia célula (DDA simples).
@@ -112,9 +113,9 @@ export function createCollisionWorld(boxes, cellSize = 64) {
     return out.hit;
   }
 
-  // Altura do topo mais alto sob (x, z): telhado onde o herói pode pousar, ou 0.
+  // Altura do topo mais alto sob (x, z): telhado onde o herói pode pousar, ou o piso.
   function heightAt(x, z) {
-    let h = 0;
+    let h = floor;
     forEachNear(x, z, x, z, (b) => {
       if (x >= b.minX && x <= b.maxX && z >= b.minZ && z <= b.maxZ && b.maxY > h) h = b.maxY;
     });
