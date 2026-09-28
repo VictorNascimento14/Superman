@@ -52,6 +52,9 @@ export function createTrafficView(scene, traffic) {
   cars.count = lights.count = nCars;
   peds.count = nPeds;
   const col = new THREE.Color();
+  // Garante o buffer de cor mesmo com 0 instâncias (o recorte copia dele).
+  cars.setColorAt(0, col.setRGB(1, 1, 1));
+  peds.setColorAt(0, col);
   for (let i = 0; i < nCars; i++) cars.setColorAt(i, col.setHex(rng.pick(CAR_COLORS)));
   for (let i = 0; i < nPeds; i++) peds.setColorAt(i, col.setHSL(rng.next(), rng.range(0.2, 0.6), rng.range(0.25, 0.6)));
   cars.castShadow = true; // pedestre é pequeno demais para a sombra valer o custo
@@ -84,7 +87,7 @@ export function createTrafficView(scene, traffic) {
         m.compose(p.set(c.x, 0, c.z), q, s);
         cars.setMatrixAt(n, m);
         lights.setMatrixAt(n, m);
-        cars.instanceColor.array.set(carColor.subarray(i * 3, i * 3 + 3), n * 3);
+        cars.setColorAt(n, col.fromArray(carColor, i * 3)); // sem subarray: nada de view nova por carro
         n++;
       });
       cars.count = lights.count = n;
@@ -95,7 +98,7 @@ export function createTrafficView(scene, traffic) {
         // Balanço do passo: sobe e desce de leve.
         m.compose(p.set(pd.x, 0.15 + Math.abs(Math.sin(t * 7 + pd.phase)) * 0.05, pd.z), q, s);
         peds.setMatrixAt(n, m);
-        peds.instanceColor.array.set(pedColor.subarray(i * 3, i * 3 + 3), n * 3);
+        peds.setColorAt(n, col.fromArray(pedColor, i * 3));
         n++;
       });
       peds.count = n;

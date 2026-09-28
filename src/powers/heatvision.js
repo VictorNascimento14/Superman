@@ -70,6 +70,7 @@ export function createHeatVision(scene, hero, collision, camera) {
   const q = new THREE.Quaternion();
   const s = new THREE.Vector3();
   const n = new THREE.Vector3();
+  const back = new THREE.Vector3();
   const zAxis = new THREE.Vector3(0, 0, 1);
 
   function addScorch(p, normal) {
@@ -157,7 +158,7 @@ export function createHeatVision(scene, hero, collision, camera) {
     glow.scale.setScalar(1.8 + Math.random() * 0.8);
     if (target) {
       target.hit(dt, aim);
-      emitSparks(aim, dir.clone().negate(), 3);
+      emitSparks(aim, back.copy(dir).negate(), 3);
     } else if (surface) {
       n.set(hit.nx, hit.ny, hit.nz);
       emitSparks(aim, n, 4);

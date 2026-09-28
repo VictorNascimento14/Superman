@@ -36,7 +36,6 @@ function speckle(ctx, w, h, rng, n, alpha, light = '#fff', dark = '#000') {
   ctx.globalAlpha = 1;
 }
 
-const gray = (v) => `rgb(${v},${v},${v})`;
 // roughnessMap lê o canal G, metalnessMap lê o B: uma textura serve para os dois.
 const rmColor = (r, m) => `rgb(0,${Math.round(r * 255)},${Math.round(m * 255)})`;
 
