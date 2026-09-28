@@ -1,10 +1,10 @@
 import * as THREE from 'three';
 import { createCloth } from './cloth.js';
 
-// Herói montado com primitivas (ADR-001). A origem do `root` é a pélvis; em pé, os pés
-// ficam FOOT_DEPTH abaixo dela. O corpo olha para +z e a cabeça para +y — em voo o
-// `root` inteiro é girado para a cabeça apontar para onde ele vai.
-export const FOOT_DEPTH = 1.04; // pélvis → sola, já com a escala
+// Herói montado com primitivas (ADR-001). A origem do `root` é a pélvis; em pé, a sola
+// fica `FLIGHT.footDepth` (flight.js, 1,04 m já com a escala) abaixo dela. O corpo olha
+// para +z e a cabeça para +y — em voo o `root` inteiro é girado para a cabeça apontar
+// para onde ele vai.
 const SCALE = 1.1;
 
 const MAT = {
@@ -213,9 +213,6 @@ const POSES = {
     legR: [[0, 0, -0.02], [0.05, 0, 0], [1.3, 0, 0]], legL: [[0, 0, 0.02], [0.05, 0, 0], [1.3, 0, 0]],
   },
 };
-
-const tmpE = new THREE.Euler();
-const tmpQ = new THREE.Quaternion();
 
 export function createHero(scene) {
   const m = Object.fromEntries(Object.entries(MAT).map(([k, f]) => [k, f()]));

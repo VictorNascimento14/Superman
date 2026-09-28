@@ -50,6 +50,7 @@ export function createMissions({ scene, collision, layout, heatVision, hud }) {
 
   // --- Construtores de cada tipo.
   const ringGeo = new THREE.TorusGeometry(1, 0.06, 8, 48);
+  ringGeo.userData.shared = true;
   function startRings(flight) {
     const course = makeRingCourse(rng, flight.pos, flight.yaw, collision, 8, 10);
     const meshes = course.map((r) => {
@@ -128,7 +129,10 @@ export function createMissions({ scene, collision, layout, heatVision, hud }) {
       hud.toast('MISSÃO FALHOU', 2.5);
       events.push({ type: 'fail' });
     }
-    for (const o of m.objects) root.remove(o);
+    for (const o of m.objects) {
+      root.remove(o);
+      disposeTree(o);
+    }
     if (m.type === 'drones') for (const d of m.drones) heatVision.targets.delete(d);
     m = null;
     pause = BREAK;
@@ -247,6 +251,15 @@ export function createMissions({ scene, collision, layout, heatVision, hud }) {
     get done() { return done; },
     get current() { return m; },
   };
+}
+
+// Cada missão cria geometrias e materiais próprios; tirar da cena não libera a GPU.
+// A geometria compartilhada dos anéis (ringGeo) é poupada.
+function disposeTree(obj) {
+  obj.traverse((o) => {
+    if (o.geometry && !o.geometry.userData.shared) o.geometry.dispose();
+    if (o.material) [].concat(o.material).forEach((mat) => mat.dispose());
+  });
 }
 
 function makePerson() {

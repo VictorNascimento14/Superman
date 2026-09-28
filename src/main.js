@@ -174,6 +174,7 @@ window.__game = {
   camHero: (x, y, z) => { debug.cam = new THREE.Vector3(x, y, z); },
   debugInfo: () => ({
     quality: qualityName, time: sky.state.name, calls: renderer.info.render.calls, tris: renderer.info.render.triangles,
+    geometries: renderer.info.memory.geometries,
     mode: flight.mode, speed: Math.round(flight.speed), pos: flight.pos.toArray().map(Math.round), pose: flight.pose,
   }),
 };

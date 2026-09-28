@@ -13,7 +13,7 @@ export const FLIGHT = {
   hoverDamp: 2.8,
   supersonicAfter: 1.2, // segundos segurando boost em linha reta
   impactSpeed: 70,
-  footDepth: 1.04,
+  footDepth: 1.04, // pélvis → sola do modelo em pé (hero.js monta as pernas para bater com isto)
 };
 
 const UP = new Vector3(0, 1, 0);
